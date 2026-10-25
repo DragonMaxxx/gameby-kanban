@@ -1,0 +1,3 @@
+/* Autor: Mateusz Bartoszewicz. Tylko do testów. */
+html, body { margin: 0; height: 100%; }
+iframe { border: 0; width: 100vw; height: 100vh; display: block; }

@@ -16,36 +16,55 @@ Każde zadanie to jedna linia: kolorowa kropka terminu, tytuł (link do posta), 
 
 ```
 🔴 🔥 Recenzja nowej konsoli  @Oliwia · 20.10, po terminie o 4 dni
-🟡 Poradnik zakupowy: myszki  @Marek · 26.10, za 2 dni
+🟡 Poradnik zakupowy: myszki  @Marek · 26.10, za 2 dni · publikacja 30.10
+🟢 Recenzja gry na premierę  @Oliwia · tekst oddany · publikacja 12.11, za 19 dni
 📝 Recenzja padu do PC  @Oliwia · tekst oddany
 ⚪ Pomysł na felieton · bez osoby
 ```
 
 Kropki: 🔴 po terminie, 🟠 dziś lub jutro, 🟡 do 3 dni, 🟢 później, ⚪ bez terminu, 📝 tekst oddany, ✅ opublikowane. 🔥 oznacza zadanie pilne (idzie na górę kolumny).
 
-### Termin i oddanie tekstu
+### Dwa terminy: oddanie tekstu i publikacja
 
-Termin w zadaniu to **termin oddania tekstu**. Dlatego liczy się tylko do momentu, gdy autor przesunie zadanie do **Do redakcji**
-(przycisk na karcie nazywa się wtedy **Oddaj do redakcji ▶**; na stronie wystarczy przeciągnąć kartę do kolumny Do redakcji).
-Od tej chwili zadanie **nie jest już „po terminie”**, także gdy czeka w Do publikacji i po publikacji:
+Każde zadanie może mieć **dwa niezależne terminy**:
 
-- na tablicy zamiast kropki jest 📝 i dopisek „tekst oddany” (opublikowane mają ✅),
-- na karcie w poście pole Termin pokazuje „tekst oddany” (zapisana data zostaje, tylko przestaje straszyć),
-- na stronie czerwona plakietka „po terminie” zmienia się na zieloną „tekst oddany”,
-- takie zadania nie wchodzą do liczników „po terminie” i „termin w ciągu 3 dni” w nagłówku, do filtra **Po terminie** ani do sekcji „Po terminie” w podsumowaniu dnia. Czekają w sekcjach „Czeka na redakcję” i „Gotowe do publikacji”.
+- **Oddanie tekstu**: do kiedy autor ma przesunąć zadanie do **Do redakcji** (przycisk na karcie nazywa się wtedy **Oddaj do redakcji ▶**; na stronie wystarczy przeciągnąć kartę do kolumny Do redakcji),
+- **Publikacja**: do kiedy tekst musi wyjść, np. premiera gry albo koniec embarga. Ten termin jest **opcjonalny**.
 
-Jeśli redakcja odeśle tekst do poprawek (status wraca do W pisaniu albo wcześniejszy), termin znowu się liczy, więc zadanie może stać się „po terminie” od nowa.
-Bot nie zapamiętuje, kiedy dokładnie tekst oddano, więc nie wyliczy „oddano 2 dni po terminie”. Które statusy znaczą „tekst oddany”, ustala jedna stała `WRITING_DONE` na początku `src/board.js`.
+Bot liczy zawsze **jeden** z nich, ten, który w danej chwili pilnuje zadania:
 
-**Nagłówek tablicy** ma przycisk **Dodaj zadanie** (formularz: tytuł, osoba z listy, termin, opis) oraz menu **Pokaż mi…**:
+| Etap zadania | Który termin się liczy | Co widać po terminie |
+| --- | --- | --- |
+| Pomysł, Przydzielone, W pisaniu | wcześniejszy z dwóch (przy tej samej dacie: oddanie) | 🔴 „po terminie o N dni”; drugi termin stoi obok jako informacja |
+| Do redakcji, Do publikacji | tylko publikacja | 🔴 „publikacja 24.10, po terminie o 1 dzień” |
+| Opublikowane | żaden | ✅, nigdy „po terminie” |
+
+Jeśli zadanie nie ma terminu publikacji, po oddaniu tekstu działa tak jak wcześniej: 📝 i dopisek „tekst oddany”, nic nie jest czerwone.
+Jeśli ma tylko termin publikacji (bez terminu oddania), liczy się on od początku.
+
+Konsekwencje w poszczególnych miejscach:
+
+- na tablicy kropka i odliczanie dotyczą terminu, który się liczy, np. `🟠 … · 25.10, jutro · publikacja 28.10` albo `🟢 … · tekst oddany · publikacja 28.10, za 4 dni`,
+- na karcie w poście są dwa pola: **Oddanie tekstu** (po oddaniu z dopiskiem „tekst oddany”, zapisana data zostaje) i **Publikacja**,
+- na stronie karta ma plakietkę terminu, który się liczy (po oddaniu: „publikacja 28 paź”, na czerwono po terminie), a drugi termin jako szarą notatkę; opublikowane nie mają plakietek,
+- liczniki „po terminie” i „termin w ciągu 3 dni” w nagłówku, filtr **Po terminie**, sortowanie kolumn i podsumowanie dnia używają tego samego terminu. Zadanie po oddaniu, z premierą za kilka dni, trafi więc do „Termin w ciągu 3 dni”, a po premierze do „Po terminie”,
+- ping w podsumowaniu dnia dostaje tylko autor, który **jeszcze pisze**. Termin publikacji po oddaniu tekstu pilnuje redakcja, więc autor nie jest już wołany.
+
+Jeśli redakcja odeśle tekst do poprawek (status wraca do W pisaniu albo wcześniejszy), znowu liczy się wcześniejszy z dwóch terminów, więc zadanie może stać się „po terminie” od nowa.
+Bot nie zapamiętuje, kiedy dokładnie tekst oddano, więc nie wyliczy „oddano 2 dni po terminie”. Które statusy znaczą „tekst oddany”, ustala jedna stała `WRITING_DONE` na początku `src/board.js`, a który termin się liczy, funkcja `activeDue` w tym samym pliku.
+
+Termin publikacji ustawisz: w formularzu nowego zadania (nagłówek tablicy, strona), w komendzie `/zadanie … publikacja:12.11`, przyciskiem **Terminy** na karcie, komendą `/edytuj publikacja:…` albo w oknie zadania na stronie.
+Posty zakładane ręcznie nie mają linii z terminem publikacji (bot czyta z treści tylko `Odpowiedzialny:` i `Termin:`), więc publikację ustawia się w nich kartą, komendą lub stroną.
+
+**Nagłówek tablicy** ma przycisk **Dodaj zadanie** (formularz: tytuł, osoba z listy, oddanie tekstu, publikacja, opis) oraz menu **Pokaż mi…**:
 Moje zadania, Bez osoby, Po terminie, Pilne, Wszystkie otwarte. Lista z menu jest prywatna, widzisz ją tylko Ty.
 
-**Karta w każdym poście** to wiadomość bota z aktualnym statusem, osobą, terminem i priorytetem oraz przyciskami:
+**Karta w każdym poście** to wiadomość bota z aktualnym statusem, osobą, terminami (oddanie tekstu i publikacja) i priorytetem oraz przyciskami:
 
 - menu **Zmień status** oraz przyciski **Wstecz** i **Dalej**,
 - **Biorę to**: bierze wolne zadanie (status z Pomysł zmienia się na Przydzielone). Gdy zadanie ma już osobę, przycisk zmienia się na **Zwolnij**, którym zdejmiesz osobę, ale tylko ze swojego zadania (cudze zwolnisz komendą `/edytuj zwolnij`). Cudzego zadania nie przejmiesz,
 - menu **Przydziel osobę**: wybierasz kogoś z listy. Osoba dostaje wiadomość w poście z oznaczeniem (to jedyne miejsce, w którym bot kogoś oznacza poza opcjonalnym podsumowaniem),
-- **Termin**: okno z polem na datę (`05.11`, `05.11.2026`, `2026-11-05`; puste pole usuwa termin),
+- **Terminy**: okno z dwoma polami, na oddanie tekstu i na publikację (`05.11`, `05.11.2026`, `2026-11-05`; puste pole usuwa dany termin),
 - **Pilne** / **Zdejmij pilne**.
 
 Przyciski karty niosą docelowy stan („ustaw Przydzielone”, „pilne włączone”), więc podwójne kliknięcie na wolnym telefonie niczego nie przesuwa dwa razy ani nie cofa.
@@ -56,8 +75,8 @@ Zadania na dalszych etapach zostają tam, gdzie są.
 
 - `/ustaw-tablice`: ustawia żywą tablicę na kanale, na którym ją wpiszesz. Tylko kierownictwo i moderacja („Zarządzanie wątkami”), tylko na zwykłym kanale tekstowym niewidocznym dla community.
   Wpisanie jej na innym kanale przenosi tablicę (stara znika).
-- `/zadanie tytul [osoba] [termin] [opis]`: zakłada post na forum z kartą. Z osobą: Przydzielone, bez: Pomysł.
-- `/edytuj [termin] [osoba] [zwolnij]`: w poście zmienia termin (`brak` usuwa go), osobę albo zdejmuje osobę. Działa w każdym poście na forum, także założonym ręcznie.
+- `/zadanie tytul [osoba] [termin] [publikacja] [opis]`: zakłada post na forum z kartą. `termin` to oddanie tekstu, `publikacja` to premiera lub embargo (oba opcjonalne). Z osobą: Przydzielone, bez: Pomysł.
+- `/edytuj [termin] [publikacja] [osoba] [zwolnij]`: w poście zmienia termin oddania tekstu lub termin publikacji (`brak` usuwa dany termin; drugiego to nie rusza), osobę albo zdejmuje osobę. Działa w każdym poście na forum, także założonym ręcznie.
 - `/tablica [moje] [publicznie]`: tablica jednorazowo, w jednej wiadomości (prywatnie albo na bieżący kanał redakcji). Przydaje się na telefonie, gdy nie chcesz wchodzić na kanał z tablicą.
 - `/panel`: dodaje świeżą kartę do posta (zastępuje poprzednią). Przydaje się w starych postach z panelem z poprzedniej wersji bota.
 - `/podsumowanie`: to samo, co bot wysyła rano.
@@ -65,7 +84,7 @@ Zadania na dalszych etapach zostają tam, gdzie są.
 ## Podsumowanie dnia
 
 Raz dziennie, w dni robocze, między 9:00 a 15:00 czasu warszawskiego, na `#ogolne` w kategorii REDAKCJA (jeśli bot wystartuje później niż 9:00, nadrobi to w tym oknie).
-Sekcje: Po terminie, Termin w ciągu 3 dni, Czeka na redakcję, Gotowe do publikacji oraz **Bez osoby, do wzięcia** (do 8 pozycji; zadania z Do redakcji i Do publikacji są w swoich sekcjach, a ich termin nie liczy się jako zaległy, bo tekst jest już oddany).
+Sekcje: Po terminie, Termin w ciągu 3 dni, Czeka na redakcję, Gotowe do publikacji oraz **Bez osoby, do wzięcia** (do 8 pozycji; zadania z Do redakcji i Do publikacji są w swoich sekcjach). Liczy się ten termin, który pilnuje zadania (patrz „Dwa terminy”): po oddaniu tekstu zadanie jest „po terminie” dopiero wtedy, gdy minie termin publikacji, i wtedy pokazuje się w sekcji „Po terminie” zamiast w „Czeka na redakcję” (nie powtarza się w obu).
 Gdy nic nie czeka, nic nie wysyła. Podsumowanie zawiera tytuły z prywatnego forum, więc bot odmawia wysyłki na kanał widoczny dla wszystkich.
 
 ## Uprawnienia
@@ -78,7 +97,7 @@ bot przestanie na nim pisać i zapisze to w logu. Uprawnienia nadane pojedynczym
 
 ## Gdzie bot trzyma dane
 
-Status to tag posta, więc żyje w Discordzie. **Osoba, termin i priorytet ustawione kartą lub komendą zapisuje bot w pliku stanu** (`state.json` w wolumenie Dockera `kanban-data`),
+Status to tag posta, więc żyje w Discordzie. **Osoba, terminy (oddanie tekstu i publikacja) i priorytet ustawione kartą lub komendą zapisuje bot w pliku stanu** (`state.json` w wolumenie Dockera `kanban-data`),
 razem z numerem karty w poście i miejscem żywej tablicy. Karta w poście pokazuje te dane, ale bot nie odczytuje ich z powrotem z Discorda.
 Konsekwencje: `docker compose down -v` albo usunięcie wolumenu kasuje osoby, terminy i priorytety (statusy zostają), a tablicę trzeba ustawić od nowa (`/ustaw-tablice`).
 Kopia zapasowa pliku:
@@ -150,7 +169,7 @@ Stare panele w postach nadal działają, a po pierwszym kliknięciu zamieniają 
 ### 6. Pierwszy test
 
 1. Na `#tablica` kliknij **Dodaj zadanie**, wpisz tytuł „Test kanbana” i zatwierdź. Powstaje post z kartą, a tablica odświeża się sama.
-2. W poście kliknij **Biorę to**, potem **Dalej**, potem **Termin** i wpisz datę. Tablica ma pokazać zmiany w ciągu kilku sekund.
+2. W poście kliknij **Biorę to**, potem **Dalej**, potem **Terminy** i wpisz datę oddania (publikację możesz zostawić pustą). Tablica ma pokazać zmiany w ciągu kilku sekund.
 3. Z menu **Pokaż mi…** wybierz **Moje zadania**.
 4. Jako osoba bez uprawnienia „Zarządzanie wątkami” spróbuj ustawić „Do publikacji”: powinna dostać odmowę. Potem usuń post testowy.
 
@@ -164,7 +183,7 @@ Discord nie pozwala przeciągać wiadomości, więc przeciąganie daje osobna st
 
 Przeciągasz kartę myszą (próg 5 px, żeby zwykłe kliknięcie otwierało szczegóły) albo na telefonie za uchwyt na karcie lub długim przytrzymaniem (około 0,35 s).
 Przy krawędzi ekranu tablica przewija się sama, Esc anuluje przeciąganie. Na wąskim ekranie kolumny są zakładkami, a kartę upuszczasz na zakładkę.
-Kliknięcie karty otwiera okno ze szczegółami: osoba, termin, pilne i przyciski statusu (to alternatywa dla klawiatury, bo samego przeciągania klawiszami nie ma).
+Kliknięcie karty otwiera okno ze szczegółami: osoba, oba terminy, pilne i przyciski statusu (to alternatywa dla klawiatury, bo samego przeciągania klawiszami nie ma).
 Tablica odświeża się sama co kilka sekund (wstrzymuje się w tle, w trakcie przeciągania i zapisu), więc zmiany kolegów pojawiają się bez przeładowania.
 
 Uprawnienia są te same co przy przyciskach bota i sprawdzane po stronie bota przy każdej zmianie (nie tylko przy logowaniu):
@@ -276,6 +295,10 @@ Dokumentacja Railway nie podaje limitu długości zmiennej. Jeśli Railway odrzu
 5. W Cloudflare usuń trasę tunelu `tablica.gameby.pl` (Routes) i jej rekord DNS, dodaj CNAME do Railway (DNS only). Poczekaj, aż Railway pokaże domenę jako aktywną (certyfikat).
 6. Zaloguj się na `https://tablica.gameby.pl` i przesuń testową kartę. Dopiero potem usuń `STATE_SEED_B64`, a na komputerze `docker compose --profile tunnel down` (**bez** `-v`; wolumen z kopią zostaw na wszelki wypadek na kilka tygodni).
 
+**Kolejne wersje na Railway**: wgraj zmienione pliki do repozytorium na GitHubie (cały folder `src`, `web`, `test` itd., nie tylko pojedyncze pliki), a Railway sam zbuduje i wdroży nową wersję. Plik stanu na wolumenie zostaje, a w wersji z dwoma terminami nic nie trzeba w nim przenosić
+(nowy klucz `p` pojawia się tylko tam, gdzie ustawisz termin publikacji). Wdrożenie restartuje bota na kilka minut (wolumen potrafi się montować z opóźnieniem), a sesje logowania na stronie są w pamięci, więc po restarcie trzeba zalogować się ponownie.
+Karty w postach przepisują się dopiero przy następnej zmianie w danym poście (albo po `/panel`), więc do tego czasu starsze karty pokazują jeszcze pole „Termin” zamiast dwóch pól; przycisk „Termin” na takiej karcie działa i otwiera już okno „Terminy”.
+
 **Czego ta instrukcja nie obejmuje:** nie testowałem wdrożenia na prawdziwym Railway, a kolejność powyżej i nagłówki bramy opisuję według dokumentacji i odpowiedzi pracowników Railway, które nie są stałą gwarancją. Po pierwszym wdrożeniu sprawdź sam logowanie i to,
 czy po kilkunastu błędnych próbach z jednego telefonu inna osoba nadal się zaloguje (to znaczy, że limity liczą adresy klientów, a nie jeden adres bramy).
 
@@ -292,7 +315,7 @@ Jeśli na serwerze są dwa kanały o tej samej nazwie, bot wybiera ten niewidocz
 - **„Brakuje tagów statusu”:** na forum musi być sześć tagów o dokładnie takich nazwach jak wyżej (wielkość liter nie ma znaczenia).
 - **„Bot nie widzi forum zadań”:** bot nie ma roli Redakcja albo forum ma inną nazwę (`FORUM_NAME` lub `FORUM_ID`). Dokładna przyczyna jest w logach.
 - **Tablica się nie odświeża:** w logach szukaj „Odświeżanie żywej tablicy nie wyszło”. Najczęstsza przyczyna to brak uprawnień bota do pisania na kanale tablicy; wpisz `/ustaw-tablice` ponownie.
-- **Przycisk „Termin” lub „Dodaj zadanie” nie otwiera okna:** w logach będzie „Używam starego formatu”, jeśli Discord odrzucił nowy format okna. Bot przełącza się wtedy na prostszy
+- **Przycisk „Terminy” lub „Dodaj zadanie” nie otwiera okna:** w logach będzie „Używam starego formatu”, jeśli Discord odrzucił nowy format okna. Bot przełącza się wtedy na prostszy
   (bez listy osób w formularzu nowego zadania; osobę przydzielisz potem menu na karcie).
 - **„Used disallowed intents” lub „invalid token” w logach:** `MESSAGE_CONTENT=1` bez włączonego Message Content Intent w Developer Portal albo zły token.
   Bot czeka wtedy 10 minut przed zakończeniem, żeby Docker nie logował go w kółko (Discord resetuje token po 1000 logowań na dobę). Popraw `.env` i uruchom `docker compose up -d`.
@@ -320,7 +343,7 @@ Jeśli na serwerze są dwa kanały o tej samej nazwie, bot wybiera ten niewidocz
 - Lista osób do przydziału na stronie zawiera osoby, które bot już zna (ktoś z nich kliknął przycisk, zalogował się na stronie albo ma zadanie). Pełną listę daje `MEMBERS_INTENT=1`.
 - Tablica odświeża się ze zwłoką około 2 sekund i nie jest wyświetlana „na żywo” w sensie push: zmiany zbierane w tym czasie trafiają do jednej aktualizacji.
   Bot edytuje tylko te wiadomości, które się zmieniły. Raz na 10 minut przechodzi po wszystkich (to odświeża też etykiety „za 2 dni” → „jutro” i wykrywa ręcznie usunięte wiadomości).
-- Kolumna na tablicy mieści około 3800 znaków, czyli kilkadziesiąt zadań; reszta jest w liczniku („… i 12 więcej”). Opublikowane pokazują pięć najnowszych postów (według numeru posta, nie daty publikacji). Zadania oddane do redakcji i opublikowane nie są oznaczane jako „po terminie” (patrz „Termin i oddanie tekstu”).
+- Kolumna na tablicy mieści około 3800 znaków, czyli kilkadziesiąt zadań; reszta jest w liczniku („… i 12 więcej”). Opublikowane pokazują pięć najnowszych postów (według numeru posta, nie daty publikacji). Zadania oddane do redakcji są „po terminie” dopiero po terminie publikacji (jeśli go mają), a opublikowane nigdy (patrz „Dwa terminy”).
 - Osoba, termin i priorytet są w pliku stanu bota (patrz wyżej), a nie w Discordzie.
 - Gdy osoba przypisana do zadania opuści serwer, zadanie zostaje przypisane do niej (na tablicy zobaczysz nieczytelne oznaczenie). Zwolnij je `/edytuj zwolnij:True` albo przydziel komuś innemu; bot nie śledzi odejść z serwera.
 - Termin bez roku (`05.11`) bot rozumie jako najbliższą taką datę w przyszłości. Jeśli wpiszesz datę z przeszłości bez roku, dostaniesz następny rok; bot zawsze pokazuje w odpowiedzi, jaki termin zapisał.

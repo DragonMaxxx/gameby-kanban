@@ -49,7 +49,8 @@ export function createActions({ store, markMoved, onSettled }) {
     take: (task) => mutate(() => post('/api/take', { id: task.id })),
     release: (task) => mutate(() => post('/api/release', { id: task.id })),
     assign: (task, userId) => mutate(() => post('/api/assign', { id: task.id, userId })),
-    due: (task, due) => mutate(() => post('/api/due', { id: task.id, due })),
+    // fields: { due } (oddanie tekstu) i/lub { pubDue } (publikacja); pusty tekst usuwa termin, brak pola zostawia go bez zmian
+    due: (task, fields) => mutate(() => post('/api/due', { id: task.id, ...fields })),
     urgent: (task, urgent) => mutate(() => post('/api/urgent', { id: task.id, urgent: Boolean(urgent) })),
     create: (fields) => mutate(async () => {
       const task = await post('/api/task', fields);

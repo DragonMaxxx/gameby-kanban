@@ -379,3 +379,72 @@ test('cardPayload: przycisk przy „W pisaniu” nazywa się „Oddaj do redakcj
   assert.equal(handed.embeds[0].fields[1].value, `${B.fmtDate('2026-10-20')} · tekst oddany`);
   assert.equal(cardPayload({ status: 'Do publikacji', assigneeId: null, due: null, urgent: false }).embeds[0].fields[1].value, 'tekst oddany');
 });
+
+// ---------------------------------------------------------------- dwa terminy: oddanie tekstu i publikacja
+test('activeDue: w pisaniu liczy się wcześniejszy termin, po oddaniu tylko publikacja, opublikowane nic', () => {
+  const base = { id: '1', due: '2026-10-26', pubDue: '2026-10-28' };
+  assert.deepEqual(B.activeDue({ ...base, status: 'W pisaniu' }), { date: '2026-10-26', kind: 'oddanie' });
+  assert.deepEqual(B.activeDue({ ...base, status: 'W pisaniu', pubDue: '2026-10-25' }), { date: '2026-10-25', kind: 'publikacja' }, 'premiera przed terminem oddania wygrywa');
+  assert.deepEqual(B.activeDue({ ...base, status: 'W pisaniu', pubDue: '2026-10-26' }), { date: '2026-10-26', kind: 'oddanie' }, 'ta sama data to oddanie');
+  assert.deepEqual(B.activeDue({ ...base, status: 'W pisaniu', due: null }), { date: '2026-10-28', kind: 'publikacja' }, 'sama publikacja liczy się od początku');
+  assert.deepEqual(B.activeDue({ ...base, status: 'Pomysł', pubDue: null }), { date: '2026-10-26', kind: 'oddanie' });
+  assert.equal(B.activeDue({ id: '1', status: 'W pisaniu' }), null);
+  for (const status of ['Do redakcji', 'Do publikacji']) {
+    assert.deepEqual(B.activeDue({ ...base, status }), { date: '2026-10-28', kind: 'publikacja' }, `${status}: termin oddania przestaje się liczyć`);
+    assert.equal(B.activeDue({ ...base, status, pubDue: null }), null, `${status} bez publikacji: nic nie jest czerwone`);
+  }
+  assert.equal(B.activeDue({ ...base, status: 'Opublikowane' }), null);
+});
+
+test('taskLine z dwoma terminami: znacznik i odliczanie dotyczą terminu, który się liczy; drugi jest tylko informacją', () => {
+  const base = { id: '1', name: 'Tekst', url: 'https://x/1', assigneeId: '5', urgent: false, due: '2026-10-25', pubDue: '2026-10-28' };
+  const today = '2026-10-24';
+  assert.equal(B.taskLine({ ...base, status: 'W pisaniu' }, today), '🟠 [Tekst](https://x/1) <@5> · 25.10, jutro · publikacja 28.10');
+  assert.equal(B.taskLine({ ...base, status: 'W pisaniu', pubDue: '2026-10-24' }, today), '🟠 [Tekst](https://x/1) <@5> · publikacja 24.10, dziś · oddanie 25.10', 'premiera przed oddaniem');
+  assert.equal(B.taskLine({ ...base, status: 'W pisaniu', due: null }, today), '🟢 [Tekst](https://x/1) <@5> · publikacja 28.10, za 4 dni');
+  assert.equal(B.taskLine({ ...base, status: 'Do redakcji' }, today), '🟢 [Tekst](https://x/1) <@5> · tekst oddany · publikacja 28.10, za 4 dni');
+  assert.equal(B.taskLine({ ...base, status: 'Do publikacji', pubDue: '2026-10-23' }, today), '🔴 [Tekst](https://x/1) <@5> · tekst oddany · publikacja 23.10, po terminie o 1 dzień', 'po oddaniu liczy się premiera');
+  assert.equal(B.taskLine({ ...base, status: 'Do redakcji', pubDue: null }, today), '📝 [Tekst](https://x/1) <@5> · tekst oddany', 'bez publikacji jak w v4');
+  assert.equal(B.taskLine({ ...base, status: 'Opublikowane', pubDue: '2026-10-01' }, today), '✅ [Tekst](https://x/1) <@5>', 'opublikowane nigdy po terminie, nawet z minioną premierą');
+  assert.equal(B.taskLine({ ...base, status: 'W pisaniu', due: '2026-10-20' }, today), '🔴 [Tekst](https://x/1) <@5> · 20.10, po terminie o 4 dni · publikacja 28.10', 'oddanie po terminie, publikacja jeszcze przed nami');
+});
+
+test('compareTasks, summaryCounts, filterTasks i digest używają terminu, który się liczy', () => {
+  const mk = (id, status, due, pubDue, assigneeId = '5') => ({ id, name: `T${id}`, url: `u${id}`, status, assigneeId, due, pubDue });
+  const today = '2026-10-24';
+  const tasks = [
+    mk('1', 'W pisaniu', '2026-10-30', '2026-10-23'), // premiera już minęła, tekst jeszcze niegotowy: po terminie
+    mk('2', 'Do redakcji', '2026-10-20', '2026-10-26', '8'), // oddany, premiera za 2 dni: w 3 dni
+    mk('3', 'Do publikacji', '2026-10-20', '2026-10-22', '9'), // oddany, premiera minęła: po terminie
+    mk('4', 'Do redakcji', '2026-10-20', null), // oddany bez premiery: nic
+    mk('5', 'W pisaniu', '2026-10-25', '2026-11-30'), // oddanie jutro
+    mk('6', 'Opublikowane', '2026-10-01', '2026-10-02'),
+  ];
+  assert.deepEqual(B.summaryCounts(tasks, today), { open: 5, overdue: 2, soon: 2, unassigned: 0, urgent: 0 });
+  assert.deepEqual(B.filterTasks(tasks, 'po-terminie', '5', today).map((t) => t.id).sort(), ['1', '3']);
+  assert.deepEqual([...tasks].sort(B.compareTasks).map((t) => t.id), ['3', '1', '5', '2', '4', '6'], 'najbliższy liczony termin pierwszy (zadanie 2 liczy się od premiery 26.10), bez terminu na końcu');
+  const s = B.digestSections(tasks, today);
+  assert.deepEqual(s.overdue.map((t) => t.id), ['3', '1']);
+  assert.deepEqual(s.soon.map((t) => t.id), ['5', '2']);
+  assert.deepEqual(s.review.map((t) => t.id), ['4'], 'zadanie pokazane wyżej nie powtarza się w „Czeka na redakcję”');
+  assert.deepEqual(s.ready.map((t) => t.id), []);
+  const d = B.renderDigest(tasks, today);
+  assert.deepEqual(d.pingIds, ['5'], 'ping dostaje tylko autor w pisaniu (5); osoby 8 i 9 oddały tekst, więc premiery pilnuje redakcja');
+  assert.deepEqual(B.renderDigest([mk('3', 'Do publikacji', '2026-10-20', '2026-10-22', '9')], today).pingIds, [], 'sama minięta premiera po oddaniu nikogo nie pinguje');
+});
+
+test('cardPayload z dwoma terminami: pola Oddanie tekstu i Publikacja, „tekst oddany” obok terminu oddania, przycisk Terminy', () => {
+  const { cardPayload } = require('../src/ui');
+  const names = (c) => c.embeds[0].fields.map((f) => f.name);
+  const writing = cardPayload({ status: 'W pisaniu', assigneeId: '5', due: '2026-10-20', pubDue: '2026-10-28', urgent: false });
+  assert.deepEqual(names(writing), ['Osoba', 'Oddanie tekstu', 'Publikacja', 'Priorytet']);
+  assert.deepEqual(writing.embeds[0].fields.slice(1, 3).map((f) => f.value), [B.fmtDate('2026-10-20'), B.fmtDate('2026-10-28')]);
+  const none = cardPayload({ status: 'W pisaniu', assigneeId: '5', due: null, urgent: false });
+  assert.deepEqual(none.embeds[0].fields.slice(1, 3).map((f) => f.value), ['brak', 'brak']);
+  const handed = cardPayload({ status: 'Do redakcji', assigneeId: '5', due: '2026-10-20', pubDue: '2026-10-28', urgent: false });
+  assert.equal(handed.embeds[0].fields[1].value, `${B.fmtDate('2026-10-20')} · tekst oddany`);
+  assert.equal(handed.embeds[0].fields[2].value, B.fmtDate('2026-10-28'));
+  const labels = writing.components[1].components.map((b) => b.toJSON().label);
+  assert.ok(labels.includes('Terminy'), 'przycisk nazywa się Terminy');
+  assert.equal(writing.components[1].components.find((b) => b.toJSON().label === 'Terminy').toJSON().custom_id, 'kb:due', 'stare karty z kb:due dalej działają');
+});

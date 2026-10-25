@@ -7,10 +7,24 @@ const STATUSES = ['Pomysł', 'Przydzielone', 'W pisaniu', 'Do redakcji', 'Do pub
 // Te statusy ustawia tylko osoba z uprawnieniem "Zarządzanie wątkami" (kierownictwo, moderacja),
 // tak samo jak moderowane tagi na forum.
 const RESTRICTED = new Set(['Do publikacji', 'Opublikowane']);
-// Termin dotyczy oddania tekstu. Od chwili, gdy tekst trafił do redakcji, autor ma swoje za sobą, więc te statusy
-// nie są "po terminie" (czekanie na redakcję i na publikację ma własne sekcje w podsumowaniu dnia).
+// Zadanie ma dwa terminy: oddania tekstu (due) i publikacji (pubDue, np. premiera gry albo embargo). Od chwili, gdy tekst trafił
+// do redakcji, autor ma swoje za sobą: termin oddania przestaje się liczyć, a liczy się już tylko termin publikacji.
 const WRITING_DONE = new Set(['Do redakcji', 'Do publikacji', 'Opublikowane']);
 const isWritingDone = (status) => WRITING_DONE.has(status);
+
+// Termin, który w danej chwili ma znaczenie: {date, kind} albo null.
+// Opublikowane: nic się już nie liczy. Tekst oddany: tylko publikacja. Wcześniej: wcześniejszy z dwóch terminów
+// (przy równych dniach pokazujemy oddanie, bo to ono jest bliższym zadaniem autora).
+function activeDue(task) {
+  if (task.status === 'Opublikowane') return null;
+  const write = task.due || null;
+  const publish = task.pubDue || null;
+  if (isWritingDone(task.status)) return publish ? { date: publish, kind: 'publikacja' } : null;
+  if (write && publish) return write <= publish ? { date: write, kind: 'oddanie' } : { date: publish, kind: 'publikacja' };
+  if (write) return { date: write, kind: 'oddanie' };
+  if (publish) return { date: publish, kind: 'publikacja' };
+  return null;
+}
 const COLOR = 0x1EB53A;
 const MAX_FIELD_CHARS = 850; // 6 pól po <= 850 znaków mieści się w limicie 6000 znaków całego embeda
 const PUBLISHED_SHOWN = 3;
@@ -179,14 +193,22 @@ function dueDot(due, today) {
 function taskLine(task, today, { showStatus = false } = {}) {
   const done = task.status === 'Opublikowane'; // opublikowane nie są "po terminie"
   const handedIn = isWritingDone(task.status) && !done; // tekst oddany, czeka na redakcję lub publikację
-  const mark = done ? '✅' : handedIn ? '📝' : dueDot(task.due, today);
+  const active = activeDue(task);
+  const mark = done ? '✅' : active ? dueDot(active.date, today) : handedIn ? '📝' : '⚪';
   let line = `${mark} ${task.urgent && !done ? '🔥 ' : ''}[${esc(task.name)}](${task.url})`;
   if (showStatus) line += ` (${task.status})`;
   const who = task.assigneeId ? ` <@${task.assigneeId}>` : (done ? '' : ' · bez osoby');
-  let due = '';
-  if (handedIn) due = ' · tekst oddany';
-  else if (task.due && !done) due = ` · ${fmtDate(task.due).slice(0, 5)}, ${whenLabel(task.due, today)}`;
-  return `${line}${who}${due}`;
+  const short = (iso) => fmtDate(iso).slice(0, 5);
+  const parts = [];
+  if (handedIn) {
+    parts.push('tekst oddany');
+    if (task.pubDue) parts.push(`publikacja ${short(task.pubDue)}, ${whenLabel(task.pubDue, today)}`);
+  } else if (active) {
+    parts.push(active.kind === 'oddanie' ? `${short(active.date)}, ${whenLabel(active.date, today)}` : `publikacja ${short(active.date)}, ${whenLabel(active.date, today)}`);
+    // Drugi termin tylko do wiadomości, bez odliczania.
+    if (task.due && task.pubDue) parts.push(active.kind === 'oddanie' ? `publikacja ${short(task.pubDue)}` : `oddanie ${short(task.due)}`);
+  }
+  return `${line}${who}${parts.length ? ` · ${parts.join(' · ')}` : ''}`;
 }
 
 // Numery Discorda (snowflake) rosną z czasem; porównujemy je jako liczby zapisane tekstem.
@@ -197,9 +219,11 @@ function compareIds(a, b) {
 // Pilne najpierw, potem najbliższy termin, potem kolejność zakładania.
 function compareTasks(a, b) {
   if (Boolean(a.urgent) !== Boolean(b.urgent)) return a.urgent ? -1 : 1;
-  if (a.due && b.due && a.due !== b.due) return a.due < b.due ? -1 : 1;
-  if (a.due && !b.due) return -1;
-  if (!a.due && b.due) return 1;
+  const da = (activeDue(a) || {}).date;
+  const db = (activeDue(b) || {}).date;
+  if (da && db && da !== db) return da < db ? -1 : 1;
+  if (da && !db) return -1;
+  if (!da && db) return 1;
   return compareIds(a.id, b.id);
 }
 
@@ -268,11 +292,11 @@ function renderColumn(status, tasks, today) {
 
 function summaryCounts(tasks, today) {
   const open = tasks.filter(isOpen);
-  const writing = open.filter((t) => !isWritingDone(t.status)); // terminy liczą się tylko do oddania tekstu
+  const days = open.map((t) => activeDue(t)).filter(Boolean).map((a) => daysBetween(today, a.date)); // liczy się termin oddania albo publikacji
   return {
     open: open.length,
-    overdue: writing.filter((t) => t.due && daysBetween(today, t.due) < 0).length,
-    soon: writing.filter((t) => t.due && daysBetween(today, t.due) >= 0 && daysBetween(today, t.due) <= 3).length,
+    overdue: days.filter((n) => n < 0).length,
+    soon: days.filter((n) => n >= 0 && n <= 3).length,
     unassigned: open.filter((t) => !t.assigneeId).length,
     urgent: open.filter((t) => t.urgent).length,
   };
@@ -305,7 +329,7 @@ function filterTasks(tasks, kind, userId, today) {
   switch (kind) {
     case 'moje': return open.filter((t) => t.assigneeId === userId);
     case 'bez-osoby': return open.filter((t) => !t.assigneeId);
-    case 'po-terminie': return open.filter((t) => !isWritingDone(t.status) && t.due && daysBetween(today, t.due) < 0);
+    case 'po-terminie': return open.filter((t) => { const a = activeDue(t); return a && daysBetween(today, a.date) < 0; });
     case 'pilne': return open.filter((t) => t.urgent);
     default: return open;
   }
@@ -324,11 +348,14 @@ function renderList(title, list, today, { note = '' } = {}) {
 
 function digestSections(tasks, today, soonDays = 3) {
   const open = tasks.filter((t) => t.status !== 'Opublikowane');
-  const dated = open.filter((t) => t.due && !isWritingDone(t.status)); // oddane teksty mają własne sekcje niżej
-  const overdue = dated.filter((t) => daysBetween(today, t.due) < 0).sort(compareTasks);
-  const soon = dated.filter((t) => { const n = daysBetween(today, t.due); return n >= 0 && n <= soonDays; }).sort(compareTasks);
-  const review = tasks.filter((t) => t.status === 'Do redakcji').sort(compareTasks);
-  const ready = tasks.filter((t) => t.status === 'Do publikacji').sort(compareTasks);
+  const dated = open.filter((t) => activeDue(t));
+  const left = (t) => daysBetween(today, activeDue(t).date);
+  const overdue = dated.filter((t) => left(t) < 0).sort(compareTasks);
+  const soon = dated.filter((t) => left(t) >= 0 && left(t) <= soonDays).sort(compareTasks);
+  // Zadanie pokazane w „Po terminie” albo „Termin w ciągu…” nie powtarza się w sekcjach redakcji i publikacji.
+  const shown = new Set([...overdue, ...soon]);
+  const review = tasks.filter((t) => t.status === 'Do redakcji' && !shown.has(t)).sort(compareTasks);
+  const ready = tasks.filter((t) => t.status === 'Do publikacji' && !shown.has(t)).sort(compareTasks);
   // Zadania w redakcji i do publikacji mają własne sekcje, więc tu ich nie powtarzamy.
   const unassigned = open.filter((t) => !t.assigneeId && t.status !== 'Do redakcji' && t.status !== 'Do publikacji').sort(compareTasks);
   return { overdue, soon, review, ready, unassigned };
@@ -344,7 +371,8 @@ function renderDigest(tasks, today, { soonDays = 3, note = '' } = {}) {
   if (s.ready.length) fields.push(fieldFor('Gotowe do publikacji', s.ready, today));
   if (s.unassigned.length) fields.push(fieldFor('Bez osoby, do wzięcia', s.unassigned, today, { limit: 8, showStatus: true }));
   if (!fields.length) return null;
-  const pingIds = [...new Set([...s.overdue, ...s.soon].map((t) => t.assigneeId).filter(Boolean))];
+  // Pingujemy tylko tych, którzy jeszcze piszą. Termin publikacji pilnuje redakcja, a nie autor, który już oddał tekst.
+  const pingIds = [...new Set([...s.overdue, ...s.soon].filter((t) => !isWritingDone(t.status)).map((t) => t.assigneeId).filter(Boolean))];
   return {
     embed: { title: 'Podsumowanie dnia', color: COLOR, fields, footer: { text: `Pełna tablica: /tablica${note ? `. ${note}` : ''}` } },
     pingIds,
@@ -352,7 +380,7 @@ function renderDigest(tasks, today, { soonDays = 3, note = '' } = {}) {
 }
 
 module.exports = {
-  STATUSES, RESTRICTED, WRITING_DONE, isWritingDone, COLOR, STATUS_COLORS, FILTERS, MAX_FIELD_CHARS,
+  STATUSES, RESTRICTED, WRITING_DONE, isWritingDone, activeDue, COLOR, STATUS_COLORS, FILTERS, MAX_FIELD_CHARS,
   norm, statusTags, currentStatus, topicTags, withStatus, stepStatus, canMove,
   normalizeDate, daysBetween, fmtDate, todayIn, clockIn, shouldSendDigest,
   parseMeta, buildStarterContent, esc, whenLabel, dueDot, taskLine, compareTasks, compareIds, newestFirst,

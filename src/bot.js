@@ -19,7 +19,9 @@ const FORUM_ONLY_MSG = 'Ta komenda i ten panel działają tylko w postach na for
 const NO_ACCESS_MSG = 'Ta funkcja jest tylko dla redakcji.';
 const NO_PERMS_MSG = 'Bot nie ma wystarczających uprawnień na tym kanale lub forum (szczegóły w logu bota).';
 const GENERIC_ERROR_MSG = 'Coś poszło nie tak. Spróbuj za chwilę, a jeśli się powtórzy, zgłoś to osobie, która obsługuje bota.';
-const BAD_DATE_MSG = 'Nie rozumiem terminu. Użyj formatu 2026-11-05, 05.11.2026 albo 05.11.';
+const badDate = (what = 'terminu') => `Nie rozumiem ${what}. Użyj formatu 2026-11-05, 05.11.2026 albo 05.11.`;
+const BAD_DATE_MSG = badDate();
+const BAD_PUB_DATE_MSG = badDate('terminu publikacji');
 
 const PERM_NAMES = new Map([
   [PermissionFlagsBits.ViewChannel, 'Wyświetlanie kanału'],
@@ -182,12 +184,15 @@ function createBot({ client, config, store, now = () => new Date(), log = consol
   }
 
   // ------------------------------------------------------------ dane zadań (osoba, termin, priorytet, karta)
-  // Trzymamy je w stanie bota, więc działają także w postach założonych ręcznie. Klucze: a (osoba), d (termin),
-  // u (pilne), c (id wiadomości z kartą). Brak klucza a lub d oznacza "nie ustawiono": wtedy sięgamy po domyślne wartości.
+  // Trzymamy je w stanie bota, więc działają także w postach założonych ręcznie. Klucze: a (osoba), d (termin oddania tekstu),
+  // p (termin publikacji), u (pilne), c (id wiadomości z kartą). Brak klucza a lub d oznacza "nie ustawiono": wtedy sięgamy
+  // po domyślne wartości. Termin publikacji ustawia się tylko na karcie, komendą albo na stronie (z postów go nie czytamy).
   const metaOf = (id) => (store.get('tasks') || {})[id];
   function patchMeta(id, patch) {
     const all = { ...(store.get('tasks') || {}) };
-    all[id] = { ...(all[id] || {}), ...patch };
+    const next = { ...(all[id] || {}), ...patch };
+    if (!next.p) delete next.p; // brak terminu publikacji nie zostawia śladu w stanie (w odróżnieniu od d, gdzie brak klucza znaczy "nie ustawiono")
+    all[id] = next;
     store.set('tasks', all);
   }
   function forgetMeta(id) {
@@ -230,7 +235,7 @@ function createBot({ client, config, store, now = () => new Date(), log = consol
       if (needA && meta.assigneeId) assigneeId = meta.assigneeId;
       if (needD) due = meta.due;
     }
-    return { status, assigneeId, due, urgent: Boolean(m.u), ok };
+    return { status, assigneeId, due, pubDue: m.p || null, urgent: Boolean(m.u), ok };
   }
 
   async function fetchArchivedThreads(forum) {
@@ -272,7 +277,7 @@ function createBot({ client, config, store, now = () => new Date(), log = consol
       const batch = await Promise.all(all.slice(i, i + 5).map(async (t) => {
         const r = await resolveTask(t, st, day);
         return {
-          id: t.id, name: t.name, url: t.url, status: r.status, assigneeId: r.assigneeId, due: r.due, urgent: r.urgent, thread: t, ok: r.ok,
+          id: t.id, name: t.name, url: t.url, status: r.status, assigneeId: r.assigneeId, due: r.due, pubDue: r.pubDue, urgent: r.urgent, thread: t, ok: r.ok,
         };
       }));
       for (const t of batch) { if (!t.ok) partial = true; tasks.push(t); }
@@ -515,40 +520,50 @@ function createBot({ client, config, store, now = () => new Date(), log = consol
     }
   }
 
-  // Termin do podpowiedzi w oknie: zapisany na karcie albo (dla postów z linią "Termin:") odczytany z treści posta.
+  // Terminy do podpowiedzi w oknie: zapisane na karcie albo (dla postów z linią "Termin:") odczytany z treści posta termin oddania.
   // Okno trzeba pokazać w 3 sekundy, więc odczyt z Discorda ma limit czasu; bez wyniku pole zostaje puste.
-  async function dueForModal(channelId) {
+  async function datesForModal(channelId) {
     const m = metaOf(channelId) || {};
-    if ('d' in m) return m.d;
+    const pubDue = m.p || null;
+    if ('d' in m) return { due: m.d || null, pubDue };
     const read = (async () => {
       const forum = await getForum();
       const st = requireStatusTags(forum);
       const thread = await fetchThread(channelId);
       return thread && thread.parentId === forum.id ? (await resolveTask(thread, st, today())).due : null;
     })().catch(() => null);
-    return Promise.race([read, new Promise((resolve) => { setTimeout(() => resolve(null), 1200).unref(); })]);
+    const due = await Promise.race([read, new Promise((resolve) => { setTimeout(() => resolve(null), 1200).unref(); })]);
+    return { due: due || null, pubDue };
   }
 
   async function openDueModal(interaction) {
     const forum = await getForum();
     requireAccess(forum, interaction.member);
-    const current = await dueForModal(interaction.channelId);
-    await showModalSafe(interaction, (legacy) => dueModal(current || null, { legacy }));
+    const current = await datesForModal(interaction.channelId);
+    await showModalSafe(interaction, (legacy) => dueModal(current, { legacy }));
   }
 
   // Pusty tekst oznacza brak terminu; zły format to błąd widoczny dla użytkownika.
-  function parseDue(rawInput) {
+  function parseDue(rawInput, badMessage = BAD_DATE_MSG) {
     const raw = String(rawInput ?? '').trim();
     if (!raw) return null;
     const due = B.normalizeDate(raw, today());
-    if (!due) throw new UserError(BAD_DATE_MSG);
+    if (!due) throw new UserError(badMessage);
     return due;
+  }
+
+  // Pole okna, którego może nie być (okno otwarte jeszcze przed aktualizacją bota): undefined znaczy "bez zmian".
+  function optionalField(interaction, id) {
+    try { return interaction.fields.getTextInputValue(id); } catch { return undefined; }
   }
 
   async function submitDue(interaction) {
     const due = parseDue(interaction.fields.getTextInputValue('due'));
+    const pubRaw = optionalField(interaction, 'pubdue');
+    const patch = { d: due };
+    if (pubRaw !== undefined) patch.p = parseDue(pubRaw, BAD_PUB_DATE_MSG);
     await onTask(interaction, async (ctx) => {
-      await applyChange(interaction, ctx, { patch: { d: due }, reason: `Kanban: ${interaction.user.tag} zmienia termin` });
+      await applyChange(interaction, ctx, { patch, reason: `Kanban: ${interaction.user.tag} zmienia terminy` });
     });
   }
 
@@ -573,6 +588,9 @@ function createBot({ client, config, store, now = () => new Date(), log = consol
     }
   }
 
+  // „termin 05.11.2026, publikacja 12.11.2026” do odpowiedzi bota (pusty tekst, gdy nie ustawiono żadnego).
+  const datesInfo = (due, pubDue) => [due ? `termin ${B.fmtDate(due)}` : null, pubDue ? `publikacja ${B.fmtDate(pubDue)}` : null].filter(Boolean).join(', ');
+
   function fieldText(interaction, id) {
     try { return interaction.fields.getTextInputValue(id).trim(); } catch { return ''; }
   }
@@ -580,15 +598,16 @@ function createBot({ client, config, store, now = () => new Date(), log = consol
   async function submitNew(interaction) {
     let person = null;
     try { person = interaction.fields.getSelectedUsers('person')?.first() ?? null; } catch { person = null; }
-    const { thread, due } = await createTask(interaction, {
+    const { thread, due, pubDue } = await createTask(interaction, {
       title: fieldText(interaction, 'title'), personId: person ? person.id : null,
-      dueRaw: fieldText(interaction, 'due'), description: fieldText(interaction, 'desc'),
+      dueRaw: fieldText(interaction, 'due'), pubRaw: fieldText(interaction, 'pubdue'), description: fieldText(interaction, 'desc'),
     });
-    await interaction.editReply({ content: `Dodano zadanie${due ? ` (termin ${B.fmtDate(due)})` : ''}: ${thread.url}`, allowedMentions: NO_MENTIONS });
+    const info = datesInfo(due, pubDue);
+    await interaction.editReply({ content: `Dodano zadanie${info ? ` (${info})` : ''}: ${thread.url}`, allowedMentions: NO_MENTIONS });
   }
 
   // ------------------------------------------------------------ tworzenie zadania
-  async function createTask(interaction, { title, personId, dueRaw, description }) {
+  async function createTask(interaction, { title, personId, dueRaw, pubRaw = '', description }) {
     const name = Array.from(String(title || '').trim()).slice(0, 100).join('');
     if (!name) throw new UserError('Podaj tytuł zadania.');
     let due = null;
@@ -596,6 +615,7 @@ function createBot({ client, config, store, now = () => new Date(), log = consol
       due = B.normalizeDate(dueRaw, today());
       if (!due) throw new UserError(BAD_DATE_MSG);
     }
+    const pubDue = parseDue(pubRaw, BAD_PUB_DATE_MSG);
     const forum = await getForum();
     requireAccess(forum, interaction.member);
     const st = requireStatusTags(forum);
@@ -607,17 +627,17 @@ function createBot({ client, config, store, now = () => new Date(), log = consol
       appliedTags: [st.byName.get(status).id],
       reason: `Kanban: nowe zadanie od ${interaction.user.tag}`,
     });
-    patchMeta(thread.id, { a: personId, d: due, u: false });
+    patchMeta(thread.id, { a: personId, d: due, p: pubDue, u: false });
     metaCache.delete(thread.id);
     try {
-      const msg = await thread.send(cardPayload({ status, assigneeId: personId, due, urgent: false }));
+      const msg = await thread.send(cardPayload({ status, assigneeId: personId, due, pubDue, urgent: false }));
       patchMeta(thread.id, { c: msg.id });
     } catch (err) {
       log.error(`Karta w poście ${thread.id}: ${err.message}`);
     }
     await notifyAssignee(thread, personId, interaction.user.id);
     touch();
-    return { thread, due };
+    return { thread, due, pubDue };
   }
 
   // ------------------------------------------------------------ komendy
@@ -649,43 +669,52 @@ function createBot({ client, config, store, now = () => new Date(), log = consol
 
   async function cmdZadanie(interaction) {
     const person = interaction.options.getUser('osoba');
-    const { thread, due } = await createTask(interaction, {
+    const { thread, due, pubDue } = await createTask(interaction, {
       title: interaction.options.getString('tytul', true),
       personId: person ? person.id : null,
       dueRaw: interaction.options.getString('termin'),
+      pubRaw: interaction.options.getString('publikacja') || '',
       description: (interaction.options.getString('opis') || '').trim(),
     });
-    const info = [person ? 'Przydzielone' : 'Pomysł', ...(due ? [`termin ${B.fmtDate(due)}`] : [])].join(', ');
+    const info = [person ? 'Przydzielone' : 'Pomysł', datesInfo(due, pubDue)].filter(Boolean).join(', ');
     await interaction.editReply({ content: `Dodano zadanie (${info}): ${thread.url}`, allowedMentions: NO_MENTIONS });
   }
 
   async function cmdEdytuj(interaction) {
     const dueRaw = interaction.options.getString('termin');
+    const pubRaw = interaction.options.getString('publikacja');
     const person = interaction.options.getUser('osoba');
     const release = interaction.options.getBoolean('zwolnij') === true;
-    if (!dueRaw && !person && !release) throw new UserError('Podaj nowy termin, osobę albo wybierz „zwolnij”.');
+    if (!dueRaw && !pubRaw && !person && !release) throw new UserError('Podaj nowy termin, termin publikacji, osobę albo wybierz „zwolnij”.');
     if (person && release) throw new UserError('Wybierz osobę albo „zwolnij”, nie oba naraz.');
-    let due; // undefined: bez zmian, null: usuń termin
-    if (dueRaw) {
-      if (/^(brak|usun|usuń|-)$/i.test(dueRaw.trim())) due = null;
-      else {
-        due = B.normalizeDate(dueRaw, today());
-        if (!due) throw new UserError(`${BAD_DATE_MSG} Albo wpisz „brak”, żeby usunąć termin.`);
-      }
-    }
+    // undefined: bez zmian, null: usuń termin
+    const parse = (raw, bad) => {
+      if (!raw) return undefined;
+      if (/^(brak|usun|usuń|-)$/i.test(raw.trim())) return null;
+      const date = B.normalizeDate(raw, today());
+      if (!date) throw new UserError(`${bad} Albo wpisz „brak”, żeby usunąć termin.`);
+      return date;
+    };
+    const due = parse(dueRaw, BAD_DATE_MSG);
+    const pubDue = parse(pubRaw, BAD_PUB_DATE_MSG);
+    const patch = {};
+    if (due !== undefined) patch.d = due;
+    if (pubDue !== undefined) patch.p = pubDue;
     let url = '';
     await onTask(interaction, async (ctx) => {
       const { thread, st } = ctx;
       url = thread.url;
       const cur = await resolveTask(thread, st, today());
       if (person || release) {
-        await assign(interaction, ctx, person ? person.id : null, cur, due !== undefined ? { d: due } : {});
+        await assign(interaction, ctx, person ? person.id : null, cur, patch);
       } else {
-        await applyChange(interaction, ctx, { patch: { d: due }, reason: `Kanban: ${interaction.user.tag} zmienia termin` });
+        await applyChange(interaction, ctx, { patch, reason: `Kanban: ${interaction.user.tag} zmienia terminy` });
       }
     });
-    const shown = due ? ` (termin ${B.fmtDate(due)})` : (due === null ? ' (bez terminu)' : '');
-    await interaction.editReply({ content: `Zaktualizowano zadanie${shown}: ${url}`, allowedMentions: NO_MENTIONS });
+    const parts = [];
+    if (due !== undefined) parts.push(due ? `termin ${B.fmtDate(due)}` : 'bez terminu');
+    if (pubDue !== undefined) parts.push(pubDue ? `publikacja ${B.fmtDate(pubDue)}` : 'bez terminu publikacji');
+    await interaction.editReply({ content: `Zaktualizowano zadanie${parts.length ? ` (${parts.join(', ')})` : ''}: ${url}`, allowedMentions: NO_MENTIONS });
   }
 
   async function cmdPanel(interaction) {
@@ -994,7 +1023,7 @@ function createBot({ client, config, store, now = () => new Date(), log = consol
   }
 
   const webTask = (thread, r) => ({
-    id: thread.id, name: thread.name, url: thread.url, status: r.status, assigneeId: r.assigneeId, due: r.due, urgent: Boolean(r.urgent),
+    id: thread.id, name: thread.name, url: thread.url, status: r.status, assigneeId: r.assigneeId, due: r.due, pubDue: r.pubDue || null, urgent: Boolean(r.urgent),
   });
 
   // Wspólny początek zmian z poziomu strony: blokada posta, świeży stan z Discorda, te same reguły co przy przyciskach karty.
@@ -1016,7 +1045,7 @@ function createBot({ client, config, store, now = () => new Date(), log = consol
         col.sort(status === 'Opublikowane' ? B.newestFirst : B.compareTasks);
         if (status === 'Opublikowane') publishedTotal = col.length;
         for (const t of (status === 'Opublikowane' ? col.slice(0, PUBLISHED_ON_PAGE) : col)) {
-          out.push({ id: t.id, name: t.name, url: t.url, status: t.status, assigneeId: t.assigneeId, due: t.due, urgent: Boolean(t.urgent) });
+          out.push({ id: t.id, name: t.name, url: t.url, status: t.status, assigneeId: t.assigneeId, due: t.due, pubDue: t.pubDue || null, urgent: Boolean(t.urgent) });
         }
       }
       return { rev, today: day, note, publishedTotal, tasks: out };
@@ -1080,16 +1109,20 @@ function createBot({ client, config, store, now = () => new Date(), log = consol
       if ((userId || null) === (cur.assigneeId || null)) return { changed: false, task: cur };
       return { changed: true, task: await assign(px, ctx, userId || null, cur) };
     }),
-    due: (actor, id, raw) => webTaskOp(actor, id, async (ctx, px) => {
-      const due = parseDue(raw);
+    // Terminy ze strony: undefined = bez zmian, pusty tekst lub null = usuń termin. Obie zmiany idą jednym zapisem i jedną blokadą.
+    due: (actor, id, raw, pubRaw) => webTaskOp(actor, id, async (ctx, px) => {
+      const patch = {};
+      if (raw !== undefined) patch.d = parseDue(raw);
+      if (pubRaw !== undefined) patch.p = parseDue(pubRaw, BAD_PUB_DATE_MSG);
       const cur = await resolveTask(ctx.thread, ctx.st, today());
-      if ((due || null) === (cur.due || null)) return { changed: false, task: cur };
-      return { changed: true, task: await applyChange(px, ctx, { patch: { d: due }, reason: `Kanban: ${px.user.tag} zmienia termin` }) };
+      const same = (!('d' in patch) || (patch.d || null) === (cur.due || null)) && (!('p' in patch) || (patch.p || null) === (cur.pubDue || null));
+      if (same) return { changed: false, task: cur };
+      return { changed: true, task: await applyChange(px, ctx, { patch, reason: `Kanban: ${px.user.tag} zmienia terminy` }) };
     }),
     urgent: (actor, id, want) => webTaskOp(actor, id, (ctx, px) => doUrgent(px, ctx, Boolean(want))),
-    async create(actor, { title, userId, due, description }) {
+    async create(actor, { title, userId, due, pubDue, description }) {
       const { thread } = await createTask(actor, {
-        title, personId: userId || null, dueRaw: String(due ?? '').trim(), description: String(description ?? '').trim().slice(0, 1500),
+        title, personId: userId || null, dueRaw: String(due ?? '').trim(), pubRaw: String(pubDue ?? '').trim(), description: String(description ?? '').trim().slice(0, 1500),
       });
       const st = requireStatusTags(await getForum());
       return webTask(thread, await resolveTask(thread, st, today()));

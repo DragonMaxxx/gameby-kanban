@@ -2,7 +2,7 @@
 // Kolumny i karty. Kolumny są trwałymi elementami; karty przebudowujemy tylko w kolumnach, w których coś się zmieniło,
 // dzięki temu przewijanie i fokus nie skaczą przy odświeżaniu co kilka sekund.
 import { h, clear, icon } from './dom.js';
-import { dueInfo } from './format.js';
+import { dueChips } from './format.js';
 import { avatarEl, personName } from './people.js';
 
 export function createBoard({ store, onOpen }) {
@@ -42,16 +42,15 @@ export function createBoard({ store, onOpen }) {
 
   function cardEl(task, state) {
     const person = task.assigneeId ? state.people.get(task.assigneeId) : null;
-    // Po oddaniu tekstu termin przestaje się liczyć: plakietka „tekst oddany” zastępuje plakietkę terminu (tylko tam, gdzie termin był),
-    // a opublikowane nie pokazują nic. Kolumna już mówi, w którym etapie jest tekst, więc bez terminu nie dokładamy szumu.
-    const handedIn = state.writingDone.has(task.status);
-    const due = handedIn ? (task.due && task.status !== 'Opublikowane' ? { text: 'tekst oddany', tone: 'done' } : null) : dueInfo(task.due, state.today);
+    // Dwa terminy: oddanie tekstu i publikacja. Podczas pisania liczy się wcześniejszy, po oddaniu tekstu tylko publikacja
+    // (bez niej plakietka „tekst oddany”, tylko tam, gdzie był termin), a opublikowane nie pokazują nic.
+    const chips = dueChips(task, state.today, state.writingDone.has(task.status));
     const mine = state.me && task.assigneeId === state.me.id;
     const who = task.assigneeId
       ? h('span', { class: 'who' }, avatarEl(person, task.assigneeId), h('span', { text: personName(state, task.assigneeId) }))
       : h('span', { class: 'who', text: 'Bez osoby' });
     const label = [task.name, `Status: ${task.status}`, task.assigneeId ? `Osoba: ${personName(state, task.assigneeId)}` : 'Bez osoby',
-      due ? (handedIn ? 'Tekst oddany' : `Termin: ${due.text}`) : null, task.urgent ? 'Pilne' : null].filter(Boolean).join('. ');
+      ...chips.map((c) => c.label), task.urgent ? 'Pilne' : null].filter(Boolean).join('. ');
     return h('li', {
       class: `card${task.urgent ? ' urgent' : ''}${mine ? ' mine' : ''}`, dataset: { id: task.id }, tabindex: '0', role: 'button', 'aria-label': label,
       onKeydown: (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onOpen(task.id); } },
@@ -61,7 +60,7 @@ export function createBoard({ store, onOpen }) {
       h('div', { class: 'card-title', text: task.name }),
       h('div', { class: 'card-meta' },
         who,
-        due ? h('span', { class: `chip ${due.tone}`, text: due.text }) : null,
+        ...chips.map((c) => h('span', { class: `chip ${c.tone}`, text: c.text })),
         task.urgent ? h('span', { class: 'chip urgent', text: 'PILNE' }) : null)));
   }
 
@@ -77,7 +76,7 @@ export function createBoard({ store, onOpen }) {
       const all = state.tasks.filter((t) => t.status === status);
       const shown = all.filter((t) => store.visible(t));
       const sig = JSON.stringify([
-        shown.map((t) => [t.id, t.name, t.assigneeId, t.due, t.urgent, t.assigneeId ? [personName(state, t.assigneeId), Boolean((state.people.get(t.assigneeId) || {}).avatar)] : 0]),
+        shown.map((t) => [t.id, t.name, t.assigneeId, t.due, t.pubDue, t.urgent, t.assigneeId ? [personName(state, t.assigneeId), Boolean((state.people.get(t.assigneeId) || {}).avatar)] : 0]),
         state.me && state.me.id, state.today, state.filter, status === 'Opublikowane' ? state.publishedTotal : 0,
       ]);
       col.count.textContent = String(shown.length);

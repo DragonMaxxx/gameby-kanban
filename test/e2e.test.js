@@ -136,7 +136,7 @@ test('/zadanie: post z tagiem i opisem, karta z przyciskami, ping tylko dla przy
     assert.equal(cards.length, 1);
     const card = cards[0];
     assert.equal(card.content, 'Status: **Przydzielone**');
-    assert.deepEqual(card.embeds[0].fields.map((f) => [f.name, f.value]), [['Osoba', `<@${ID.oliwia}>`], ['Termin', '05.11.2026'], ['Priorytet', 'zwykły']]);
+    assert.deepEqual(card.embeds[0].fields.map((f) => [f.name, f.value]), [['Osoba', `<@${ID.oliwia}>`], ['Oddanie tekstu', '05.11.2026'], ['Publikacja', 'brak'], ['Priorytet', 'zwykły']]);
     const [row1, row2, row3] = card.components;
     const select = row1.components[0];
     assert.equal(select.custom_id, 'kb:status');
@@ -300,7 +300,7 @@ test('/panel w poście dodaje kartę z aktualnym statusem i zastępuje poprzedni
     const first = cardsIn(t.fake, ids.a.id);
     assert.equal(first.length, 1);
     assert.equal(first[0].content, 'Status: **W pisaniu**');
-    assert.deepEqual(first[0].embeds[0].fields.map((f) => f.value), [`<@${ID.oliwia}>`, '20.10.2026', 'zwykły'], 'osoba i termin z treści ręcznego posta');
+    assert.deepEqual(first[0].embeds[0].fields.map((f) => f.value), [`<@${ID.oliwia}>`, '20.10.2026', 'brak', 'zwykły'], 'osoba i termin oddania z treści ręcznego posta, publikacji w treści nie szukamy');
     await t.fake.command(ID.autor, 'panel', [], ids.a.id);
     const second = cardsIn(t.fake, ids.a.id);
     assert.equal(second.length, 1, 'stara karta jest usuwana');
@@ -634,7 +634,7 @@ test('/edytuj zmienia termin i osobę w dowolnym poście (też założonym ręcz
     assert.match(editOf(ev).content, /Zaktualizowano zadanie/);
     assert.equal(t.fake.messagesOf(th.id)[0].content, 'Źródła', 'treść posta bez zmian');
     const card = cardsIn(t.fake, th.id)[0];
-    assert.deepEqual(card.embeds[0].fields.map((f) => f.value), [`<@${ID.autor}>`, '10.11.2026', 'zwykły']);
+    assert.deepEqual(card.embeds[0].fields.map((f) => f.value), [`<@${ID.autor}>`, '10.11.2026', 'brak', 'zwykły']);
     const board2 = await t.fake.command(ID.autor, 'tablica');
     assert.match(fieldMap(editOf(board2).embeds[0])['Przydzielone (1)'], new RegExp(`<@${ID.autor}> · 10\\.11, za 17 dni`));
 
@@ -643,7 +643,7 @@ test('/edytuj zmienia termin i osobę w dowolnym poście (też założonym ręcz
     const bad = await t.fake.command(ID.szef, 'edytuj', [opt('termin', 'kiedyś')], th.id);
     assert.match(editOf(bad).content, /Nie rozumiem terminu/);
     const none = await t.fake.command(ID.szef, 'edytuj', [], th.id);
-    assert.match(editOf(none).content, /Podaj nowy termin, osobę albo wybierz „zwolnij”/);
+    assert.match(editOf(none).content, /Podaj nowy termin, termin publikacji, osobę albo wybierz „zwolnij”/);
     const both = await t.fake.command(ID.szef, 'edytuj', [opt('osoba', ID.autor, 6), opt('zwolnij', true, 5)], th.id);
     assert.match(editOf(both).content, /osobę albo „zwolnij”/);
 
@@ -866,18 +866,18 @@ test('„Pilne”: ustawia priorytet (powtórne kliknięcie nic nie odwraca), zm
   try {
     const th = await newTask(t, [opt('tytul', 'Gorące'), opt('osoba', ID.oliwia, 6)]);
     const on = await click(t, ID.autor, th.id, 'kb:urgent:on');
-    assert.equal(editOf(on).embeds[0].fields[2].value, '🔥 pilne');
+    assert.equal(editOf(on).embeds[0].fields[3].value, '🔥 pilne');
     const btn = flat(editOf(on)).find((c) => c.custom_id === 'kb:urgent:off');
     assert.equal(btn.label, 'Zdejmij pilne');
     const board = fieldMap(editOf(await t.fake.command(ID.autor, 'tablica')).embeds[0]);
     assert.match(board['Przydzielone (1)'], /🔥 \[Gorące\]/);
     const double = await click(t, ID.oliwia, th.id, 'kb:urgent:on'); // drugie kliknięcie tego samego przycisku
-    assert.equal(editOf(double).embeds[0].fields[2].value, '🔥 pilne', 'nie przełącza z powrotem');
+    assert.equal(editOf(double).embeds[0].fields[3].value, '🔥 pilne', 'nie przełącza z powrotem');
     const off = await click(t, ID.autor, th.id, 'kb:urgent:off');
-    assert.equal(editOf(off).embeds[0].fields[2].value, 'zwykły');
+    assert.equal(editOf(off).embeds[0].fields[3].value, 'zwykły');
     assert.ok(flat(editOf(off)).some((c) => c.custom_id === 'kb:urgent:on' && c.label === 'Pilne'));
     const doubleOff = await click(t, ID.autor, th.id, 'kb:urgent:off');
-    assert.equal(editOf(doubleOff).embeds[0].fields[2].value, 'zwykły');
+    assert.equal(editOf(doubleOff).embeds[0].fields[3].value, 'zwykły');
   } finally { await t.close(); }
 });
 
@@ -1129,7 +1129,7 @@ test('nagłówek tablicy: przycisk „Dodaj zadanie” otwiera formularz z list�
     assert.equal(open[0].type, 9);
     assert.equal(open[0].data.custom_id, 'kb:newmodal');
     const comps = open[0].data.components;
-    assert.deepEqual(comps.map((c) => [c.type, c.component.type, c.component.custom_id]), [[18, 4, 'title'], [18, 5, 'person'], [18, 4, 'due'], [18, 4, 'desc']]);
+    assert.deepEqual(comps.map((c) => [c.type, c.component.type, c.component.custom_id]), [[18, 4, 'title'], [18, 5, 'person'], [18, 4, 'due'], [18, 4, 'pubdue'], [18, 4, 'desc']]);
     assert.equal(comps[0].component.required, true);
     assert.equal(comps[1].component.required, false);
 
@@ -1142,7 +1142,7 @@ test('nagłówek tablicy: przycisk „Dodaj zadanie” otwiera formularz z list�
     assert.deepEqual(body.applied_tags, [tagId('Przydzielone')]);
     assert.match(editOf(ev).content, new RegExp(`Dodano zadanie \\(termin 12\\.11\\.2026\\): ${url(thread.id)}`));
     await waitFor(() => cardsIn(t.fake, thread.id).length === 1 && t.fake.messagesOf(thread.id).length === 3);
-    assert.deepEqual(valuesOf(cardsIn(t.fake, thread.id)[0]), [`<@${ID.oliwia}>`, '12.11.2026', 'zwykły']);
+    assert.deepEqual(valuesOf(cardsIn(t.fake, thread.id)[0]), [`<@${ID.oliwia}>`, '12.11.2026', 'brak', 'zwykły']);
     await waitFor(() => boardMessages(t.fake).find((m) => m.embeds[0].title.startsWith('Przydzielone')).embeds[0].title === 'Przydzielone · 1');
 
     // bez osoby, bez terminu i bez opisu
@@ -1169,7 +1169,7 @@ test('formularz nowego zadania w starym formacie (po odrzuceniu nowego przez Dis
     const header = boardMessages(t.fake)[0];
     t.fake.failures.push({ re: /^POST \/interactions\/\d+\/[^/]+\/callback$/, status: 400, code: 50035 });
     const open = await click(t, ID.autor, ID.ogolne, 'kb:new', { messageId: header.id });
-    assert.deepEqual(open[0].data.components.map((c) => c.type), [1, 1, 1], 'tytuł, termin, opis w wierszach akcji');
+    assert.deepEqual(open[0].data.components.map((c) => c.type), [1, 1, 1, 1], 'tytuł, oddanie, publikacja, opis w wierszach akcji');
     const ev = await t.fake.modalSubmit(ID.autor, ID.ogolne, 'kb:newmodal', { title: 'Stary formularz', due: '', desc: '' }, { legacy: true, messageId: header.id });
     assert.match(editOf(ev).content, /Dodano zadanie/);
     assert.equal(t.fake.created[0].body.name, 'Stary formularz');
@@ -1250,8 +1250,8 @@ test('klik na starej kopii karty aktualizuje też zarejestrowaną kartę w pośc
     const stale = t.fake.makeMessage(t.fake.newId(), th.id, ID.app, 'Status: **Pomysł**', { components: registered.components });
     t.fake.messages.get(th.id).push(stale);
     const ev = await click(t, ID.autor, th.id, 'kb:urgent:on', { messageId: stale.id });
-    assert.equal(editOf(ev).embeds[0].fields[2].value, '🔥 pilne', 'klikana wiadomość');
-    assert.equal(t.fake.messagesOf(th.id).find((m) => m.id === registered.id).embeds[0].fields[2].value, '🔥 pilne', 'zarejestrowana karta');
+    assert.equal(editOf(ev).embeds[0].fields[3].value, '🔥 pilne', 'klikana wiadomość');
+    assert.equal(t.fake.messagesOf(th.id).find((m) => m.id === registered.id).embeds[0].fields[3].value, '🔥 pilne', 'zarejestrowana karta');
   } finally { await t.close(); }
 });
 
@@ -1485,5 +1485,130 @@ test('oddanie tekstu przyciskiem zdejmuje „po terminie”, a cofnięcie do pis
     assert.equal(editOf(back).embeds[0].fields[1].value, '26.10.2026');
     const again = await t.fake.command(ID.autor, 'tablica');
     assert.match(fieldMap(editOf(again).embeds[0])['W pisaniu (1)'], /🔴 \[Recenzja do oddania\].*po terminie o 3 dni/);
+  } finally { await t.close(); }
+});
+
+// ---------------------------------------------------------------- dwa terminy: oddanie tekstu i publikacja
+const stateOf = (t, id) => JSON.parse(fs.readFileSync(t.stateFile, 'utf8')).tasks[id];
+
+test('dwa terminy: /zadanie z publikacją, /edytuj zmienia je niezależnie, „brak” usuwa jeden, zły format ma osobny komunikat', async () => {
+  const t = await boot({ now: () => NOW });
+  try {
+    const ev = await t.fake.command(ID.autor, 'zadanie', [opt('tytul', 'Recenzja przed premierą'), opt('osoba', ID.oliwia, 6), opt('termin', '26.10'), opt('publikacja', '28.10')]);
+    assert.match(editOf(ev).content, /Dodano zadanie \(Przydzielone, termin 26\.10\.2026, publikacja 28\.10\.2026\)/);
+    const th = t.fake.created[0].thread;
+    await waitFor(() => cardsIn(t.fake, th.id).length === 1);
+    assert.deepEqual(valuesOf(cardsIn(t.fake, th.id)[0]), [`<@${ID.oliwia}>`, '26.10.2026', '28.10.2026', 'zwykły']);
+    assert.deepEqual(stateOf(t, th.id), { a: ID.oliwia, d: '2026-10-26', p: '2026-10-28', u: false, c: cardsIn(t.fake, th.id)[0].id });
+    const line = fieldMap(editOf(await t.fake.command(ID.autor, 'tablica')).embeds[0])['Przydzielone (1)'];
+    assert.match(line, /26\.10, za 2 dni · publikacja 28\.10/);
+
+    const pub = await t.fake.command(ID.szef, 'edytuj', [opt('publikacja', '30.10')], th.id);
+    assert.match(editOf(pub).content, /Zaktualizowano zadanie \(publikacja 30\.10\.2026\)/);
+    assert.deepEqual(valuesOf(cardsIn(t.fake, th.id)[0]).slice(1, 3), ['26.10.2026', '30.10.2026'], 'sama publikacja nie rusza oddania');
+    const due = await t.fake.command(ID.szef, 'edytuj', [opt('termin', 'brak')], th.id);
+    assert.match(editOf(due).content, /bez terminu\)/);
+    assert.deepEqual(valuesOf(cardsIn(t.fake, th.id)[0]).slice(1, 3), ['brak', '30.10.2026'], 'samo oddanie nie rusza publikacji');
+    const line2 = fieldMap(editOf(await t.fake.command(ID.autor, 'tablica')).embeds[0])['Przydzielone (1)'];
+    assert.match(line2, /publikacja 30\.10, za 6 dni/, 'sama publikacja liczy się od początku');
+    const both = await t.fake.command(ID.szef, 'edytuj', [opt('termin', '27.10'), opt('publikacja', 'brak')], th.id);
+    assert.match(editOf(both).content, /termin 27\.10\.2026, bez terminu publikacji/);
+    assert.deepEqual(valuesOf(cardsIn(t.fake, th.id)[0]).slice(1, 3), ['27.10.2026', 'brak']);
+    assert.equal(stateOf(t, th.id).p, undefined, 'brak publikacji nie zostawia klucza w stanie');
+
+    const bad = await t.fake.command(ID.szef, 'edytuj', [opt('publikacja', 'kiedyś')], th.id);
+    assert.match(editOf(bad).content, /Nie rozumiem terminu publikacji.*„brak”/);
+    assert.equal(valuesOf(cardsIn(t.fake, th.id)[0])[1], '27.10.2026');
+    const badNew = await t.fake.command(ID.autor, 'zadanie', [opt('tytul', 'X'), opt('publikacja', 'premiera')]);
+    assert.match(editOf(badNew).content, /Nie rozumiem terminu publikacji/);
+    assert.equal(t.fake.created.length, 1, 'zły termin publikacji nie tworzy posta');
+  } finally { await t.close(); }
+});
+
+test('okno „Terminy”: dwa pola z obecnymi datami, zapis obu, stare okno bez pola publikacji nie kasuje jej, zły format nic nie zmienia', async () => {
+  const t = await boot({ now: () => NOW });
+  try {
+    const th = await newTask(t, [opt('tytul', 'Z dwoma terminami'), opt('termin', '05.11'), opt('publikacja', '12.11')]);
+    const open = await click(t, ID.autor, th.id, 'kb:due');
+    assert.equal(open[0].data.custom_id, 'kb:duemodal');
+    assert.deepEqual(open[0].data.components.map((c) => [c.type, c.component.custom_id, c.component.value]), [[18, 'due', '05.11.2026'], [18, 'pubdue', '12.11.2026']]);
+
+    const both = await t.fake.modalSubmit(ID.autor, th.id, 'kb:duemodal', { due: '06.11', pubdue: '13.11' });
+    assert.deepEqual(valuesOf(editOf(both)).slice(1, 3), ['06.11.2026', '13.11.2026']);
+
+    const oldModal = await t.fake.modalSubmit(ID.autor, th.id, 'kb:duemodal', { due: '07.11' });
+    assert.equal(oldModal[0].type, 6);
+    assert.deepEqual(valuesOf(editOf(oldModal)).slice(1, 3), ['07.11.2026', '13.11.2026'], 'okno otwarte przed aktualizacją (bez pola publikacji) zmienia tylko oddanie');
+
+    const bad = await t.fake.modalSubmit(ID.autor, th.id, 'kb:duemodal', { due: '08.11', pubdue: 'premiera' });
+    assert.match(errorOf(bad).content, /Nie rozumiem terminu publikacji/);
+    assert.deepEqual([stateOf(t, th.id).d, stateOf(t, th.id).p], ['2026-11-07', '2026-11-13'], 'błąd w jednym polu nie zapisuje drugiego');
+
+    const cleared = await t.fake.modalSubmit(ID.autor, th.id, 'kb:duemodal', { due: '07.11', pubdue: '' });
+    assert.deepEqual(valuesOf(editOf(cleared)).slice(1, 3), ['07.11.2026', 'brak']);
+    const reopen = await click(t, ID.autor, th.id, 'kb:due');
+    assert.equal(reopen[0].data.components[1].component.value, undefined, 'puste pole publikacji jest puste także po ponownym otwarciu');
+  } finally { await t.close(); }
+});
+
+test('okno „Terminy” w starym formacie (po odrzuceniu nowego przez Discorda) też zapisuje oba terminy', async () => {
+  const t = await boot({ now: () => NOW });
+  try {
+    const th = await newTask(t, [opt('tytul', 'Stary format')]);
+    t.fake.failures.push({ re: /^POST \/interactions\/\d+\/[^/]+\/callback$/, status: 400, code: 50035 });
+    const open = await click(t, ID.autor, th.id, 'kb:due');
+    assert.deepEqual(open[0].data.components.map((c) => c.type), [1, 1], 'oddanie i publikacja w wierszach akcji');
+    const ev = await t.fake.modalSubmit(ID.autor, th.id, 'kb:duemodal', { due: '12.11.2026', pubdue: '14.11.2026' }, { legacy: true });
+    assert.deepEqual(valuesOf(editOf(ev)).slice(1, 3), ['12.11.2026', '14.11.2026']);
+  } finally { await t.close(); }
+});
+
+test('formularz nowego zadania: pole publikacji trafia na kartę i do stanu, zły termin publikacji nie tworzy posta (nowy i stary format)', async () => {
+  const t = await boot({ env: BOARD_ENV, now: () => NOW });
+  try {
+    await t.fake.command(ID.szef, 'ustaw-tablice', [], ID.ogolne);
+    const header = boardMessages(t.fake)[0];
+    const ev = await t.fake.modalSubmit(ID.autor, ID.ogolne, 'kb:newmodal', { title: 'Z premierą', person: [], due: '12.11', pubdue: '20.11', desc: '' }, { messageId: header.id });
+    assert.match(editOf(ev).content, /Dodano zadanie \(termin 12\.11\.2026, publikacja 20\.11\.2026\)/);
+    const th = t.fake.created[0].thread;
+    await waitFor(() => cardsIn(t.fake, th.id).length === 1);
+    assert.deepEqual(valuesOf(cardsIn(t.fake, th.id)[0]), ['brak, kliknij „Biorę to”', '12.11.2026', '20.11.2026', 'zwykły']);
+    assert.equal(stateOf(t, th.id).p, '2026-11-20');
+
+    const bad = await t.fake.modalSubmit(ID.autor, ID.ogolne, 'kb:newmodal', { title: 'Zły', person: [], due: '', pubdue: 'wkrótce', desc: '' }, { messageId: header.id });
+    assert.match(editOf(bad).content, /Nie rozumiem terminu publikacji/);
+    assert.equal(t.fake.created.length, 1);
+
+    const legacy = await t.fake.modalSubmit(ID.autor, ID.ogolne, 'kb:newmodal', { title: 'Stary', due: '', pubdue: '21.11', desc: '' }, { legacy: true, messageId: header.id });
+    assert.match(editOf(legacy).content, /Dodano zadanie \(publikacja 21\.11\.2026\)/);
+    assert.equal(stateOf(t, t.fake.created[1].thread.id).p, '2026-11-21');
+  } finally { await t.close(); }
+});
+
+test('przebieg z premierą: pisanie liczy wcześniejszy termin, po oddaniu tekstu tylko publikacja, po opublikowaniu nic nie jest po terminie', async () => {
+  let clock = NOW;
+  const t = await boot({ now: () => clock });
+  try {
+    const th = await newTask(t, [opt('tytul', 'Recenzja na premierę'), opt('osoba', ID.oliwia, 6), opt('termin', '25.10'), opt('publikacja', '28.10')]);
+    const board = async () => editOf(await t.fake.command(ID.autor, 'tablica')).embeds[0];
+    assert.match(fieldMap(await board())['Przydzielone (1)'], /🟠 .*25\.10, jutro · publikacja 28\.10/);
+
+    const toWriting = await click(t, ID.autor, th.id, 'kb:go:W pisaniu');
+    assert.equal(toWriting[0].type, 6);
+    const handed = await click(t, ID.autor, th.id, 'kb:go:Do redakcji');
+    assert.equal(editOf(handed).embeds[0].fields[1].value, `25.10.2026 · tekst oddany`);
+    assert.equal(editOf(handed).embeds[0].fields[2].value, '28.10.2026');
+    let f = fieldMap(await board());
+    assert.match(f['Do redakcji (1)'], /🟢 .*tekst oddany · publikacja 28\.10, za 4 dni/, 'oddanie przestało się liczyć, została premiera');
+
+    clock = new Date('2026-10-29T10:00:00Z'); // dzień po premierze, tekst nadal czeka w redakcji
+    f = fieldMap(await board());
+    assert.match(f['Do redakcji (1)'], /🔴 .*tekst oddany · publikacja 28\.10, po terminie o 1 dzień/);
+
+    const published = await click(t, ID.szef, th.id, 'kb:go:Opublikowane');
+    assert.equal(published[0].type, 6);
+    f = fieldMap(await board());
+    assert.match(f['Opublikowane (1)'], /✅ .*Recenzja na premierę/);
+    assert.doesNotMatch(JSON.stringify(f), /po terminie/, 'opublikowane nigdy nie jest po terminie, nawet z minioną premierą');
   } finally { await t.close(); }
 });

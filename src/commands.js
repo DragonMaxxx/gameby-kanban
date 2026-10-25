@@ -15,12 +15,14 @@ function buildCommands() {
       .setDescription('Dodaj zadanie jako nowy post na forum artykułów')
       .addStringOption((o) => o.setName('tytul').setDescription('Tytuł zadania lub artykułu').setRequired(true).setMaxLength(100))
       .addUserOption((o) => o.setName('osoba').setDescription('Kto jest odpowiedzialny'))
-      .addStringOption((o) => o.setName('termin').setDescription('Termin: 2026-11-05, 05.11.2026 lub 05.11').setMaxLength(10))
+      .addStringOption((o) => o.setName('termin').setDescription('Termin oddania tekstu: 2026-11-05, 05.11.2026 lub 05.11').setMaxLength(10))
+      .addStringOption((o) => o.setName('publikacja').setDescription('Termin publikacji (np. premiera): 2026-11-12, 12.11.2026 lub 12.11').setMaxLength(10))
       .addStringOption((o) => o.setName('opis').setDescription('Krótki opis, źródła, uwagi').setMaxLength(1500))),
     guildOnly(new SlashCommandBuilder()
       .setName('edytuj')
-      .setDescription('Zmień termin lub osobę w tym zadaniu (działa w każdym poście na forum zadań)')
-      .addStringOption((o) => o.setName('termin').setDescription('Nowy termin: 2026-11-05, 05.11.2026, 05.11 albo „brak”, żeby usunąć').setMaxLength(10))
+      .setDescription('Zmień terminy lub osobę w tym zadaniu (działa w każdym poście na forum zadań)')
+      .addStringOption((o) => o.setName('termin').setDescription('Nowy termin oddania tekstu: 2026-11-05, 05.11.2026, 05.11 albo „brak”, żeby usunąć').setMaxLength(10))
+      .addStringOption((o) => o.setName('publikacja').setDescription('Nowy termin publikacji: 2026-11-12, 12.11.2026, 12.11 albo „brak”, żeby usunąć').setMaxLength(10))
       .addUserOption((o) => o.setName('osoba').setDescription('Nowa osoba odpowiedzialna'))
       .addBooleanOption((o) => o.setName('zwolnij').setDescription('Zdejmij osobę z zadania (wróci do puli „Bez osoby”)'))),
     guildOnly(new SlashCommandBuilder()

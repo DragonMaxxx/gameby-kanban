@@ -390,11 +390,21 @@ function createWebServer({
       case '/api/take': task = await bot.web.take(actor, snowflake(body.id, 'zadanie')); break;
       case '/api/release': task = await bot.web.release(actor, snowflake(body.id, 'zadanie')); break;
       case '/api/assign': task = await bot.web.assign(actor, snowflake(body.id, 'zadanie'), snowflake(body.userId, 'osoba', { nullable: true })); break;
-      case '/api/due':
+      case '/api/due': {
         // Brak pola nie znaczy "usuń termin" (to robi pusty tekst albo null): inaczej błąd w kliencie kasowałby terminy po cichu.
-        if (!Object.hasOwn(body, 'due') || (body.due !== null && typeof body.due !== 'string')) throw new HttpError(400, 'Nieprawidłowe: termin.');
-        task = await bot.web.due(actor, snowflake(body.id, 'zadanie'), str(body.due, 10, { name: 'termin' }));
+        // Pola due (oddanie tekstu) i pubDue (publikacja) są niezależne, ale trzeba podać co najmniej jedno.
+        const given = (key) => Object.hasOwn(body, key);
+        const valid = (key) => body[key] === null || typeof body[key] === 'string';
+        if ((!given('due') && !given('pubDue')) || (given('due') && !valid('due')) || (given('pubDue') && !valid('pubDue'))) {
+          throw new HttpError(400, 'Nieprawidłowe: termin.');
+        }
+        task = await bot.web.due(
+          actor, snowflake(body.id, 'zadanie'),
+          given('due') ? str(body.due, 10, { name: 'termin' }) : undefined,
+          given('pubDue') ? str(body.pubDue, 10, { name: 'termin publikacji' }) : undefined,
+        );
         break;
+      }
       case '/api/urgent':
         if (typeof body.urgent !== 'boolean') throw new HttpError(400, 'Nieprawidłowe: priorytet.');
         task = await bot.web.urgent(actor, snowflake(body.id, 'zadanie'), body.urgent);
@@ -406,6 +416,7 @@ function createWebServer({
           title,
           userId: snowflake(body.userId, 'osoba', { nullable: true }),
           due: str(body.due, 10, { name: 'termin' }),
+          pubDue: str(body.pubDue, 10, { name: 'termin publikacji' }),
           description: str(body.description, 1500, { name: 'opis' }),
         });
         break;

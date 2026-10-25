@@ -90,6 +90,24 @@ test('mysz: oddanie tekstu zamienia „po terminie” na „tekst oddany”, a c
   } finally { await ctx.close(); }
 }));
 
+test('opublikowane zadanie z terminem z przeszłości nie ma żadnej plakietki terminu, a oddane do publikacji pokazuje „tekst oddany”', { skip: SKIP }, () => withSite({}, async (t) => {
+  const { ctx, page, problems, session } = await openAs(t, browser, ID.autor);
+  try {
+    const szef = await t.login(ID.szef);
+    const board = await boardOf(t, session);
+    const published = taskIn(board, 'Stary D').id;
+    const forPublication = taskIn(board, 'Do pub E').id;
+    assert.equal((await t.call(szef, 'POST', '/api/due', { id: published, due: '2026-10-20' })).status, 200);
+    assert.equal((await t.call(szef, 'POST', '/api/due', { id: forPublication, due: '2026-10-20' })).status, 200);
+    await ready(page);
+    await page.waitForSelector(`${cardSel('Do pub E', 'Do publikacji')} .chip.done`);
+    assert.equal(await page.locator(`${cardSel('Stary D', 'Opublikowane')} .chip`).count(), 0, 'opublikowane nie pokazują terminu');
+    assert.equal(await page.locator('.chip.overdue').count(), 0, 'nigdzie nie ma czerwonego „po terminie”');
+    assert.equal(await page.locator(`${cardSel('Do pub E', 'Do publikacji')} .chip.done`).innerText(), 'tekst oddany');
+    assert.deepEqual(problems, []);
+  } finally { await ctx.close(); }
+}));
+
 test('mysz: zwykłe kliknięcie otwiera okno zadania, a Esc je zamyka i oddaje fokus karcie', { skip: SKIP }, () => withSite({}, async (t) => {
   const { ctx, page, problems } = await openAs(t, browser, ID.autor);
   try {
@@ -447,6 +465,99 @@ test('nowe zadanie: formularz tworzy post na forum z osobą, terminem i opisem; 
     const task = (await boardOf(t, session)).json.tasks.find((x) => x.name === 'Zadanie z formularza');
     assert.equal(task.assigneeId, ID.oliwia);
     assert.equal(task.due, '2026-11-12');
+    assert.deepEqual(problems, []);
+  } finally { await ctx.close(); }
+}));
+
+// ---------------------------------------------------------------- dwa terminy
+test('dwa terminy na kartach: w pisaniu wcześniejszy z drugim jako notatką, po oddaniu tylko publikacja (czerwona po terminie), opublikowane bez plakietek', { skip: SKIP }, () => withSite({}, async (t) => {
+  const { ctx, page, problems, session } = await openAs(t, browser, ID.autor);
+  try {
+    const board = await boardOf(t, session);
+    const writing = taskIn(board, 'Recenzja A').id;
+    const forPublication = taskIn(board, 'Do pub E').id;
+    const szef = await t.login(ID.szef);
+    // dzisiaj w testach: 24.10
+    assert.equal((await t.call(szef, 'POST', '/api/due', { id: writing, due: '2026-10-26', pubDue: '2026-10-28' })).status, 200);
+    assert.equal((await t.call(szef, 'POST', '/api/due', { id: forPublication, due: '2026-10-20', pubDue: '2026-10-23' })).status, 200);
+    await ready(page);
+    const chips = (name, status) => page.locator(`${cardSel(name, status)} .chip`).allInnerTexts();
+
+    await page.waitForSelector(`${cardSel('Recenzja A', 'W pisaniu')} .chip:has-text("publikacja 28 paź")`);
+    assert.deepEqual(await chips('Recenzja A', 'W pisaniu'), ['26 paź', 'publikacja 28 paź'], 'wcześniejszy termin liczy się, drugi jest tylko notatką');
+    assert.equal(await page.locator(`${cardSel('Recenzja A', 'W pisaniu')} .chip.soon`).count(), 1, 'kolor ma tylko termin, który się liczy');
+    assert.match(await page.locator(cardSel('Recenzja A', 'W pisaniu')).getAttribute('aria-label'), /Termin: 26 paź.*Publikacja: 28 paź/);
+
+    await page.waitForSelector(`${cardSel('Do pub E', 'Do publikacji')} .chip.overdue`);
+    assert.deepEqual(await chips('Do pub E', 'Do publikacji'), ['publikacja 23 paź · po terminie'], 'po oddaniu liczy się tylko premiera');
+    assert.match(await page.locator(cardSel('Do pub E', 'Do publikacji')).getAttribute('aria-label'), /Publikacja: 23 paź · po terminie/);
+
+    const a = await centerOf(page.locator(cardSel('Recenzja A', 'W pisaniu')));
+    const b = await centerOf(page.locator(`${colSel('Do redakcji')} .col-list`));
+    await mouseDrag(page, a, b);
+    await page.waitForSelector(cardSel('Recenzja A', 'Do redakcji'));
+    await page.waitForSelector(`${cardSel('Recenzja A', 'Do redakcji')} .chip:has-text("publikacja 28 paź")`);
+    assert.deepEqual(await chips('Recenzja A', 'Do redakcji'), ['publikacja 28 paź'], 'oddanie przestało się liczyć, została premiera');
+
+    // opublikowane: żadnej plakietki, mimo minionej premiery
+    assert.equal((await t.call(szef, 'POST', '/api/move', { id: forPublication, status: 'Opublikowane' })).status, 200);
+    await page.waitForSelector(cardSel('Do pub E', 'Opublikowane'));
+    assert.equal(await page.locator(`${cardSel('Do pub E', 'Opublikowane')} .chip`).count(), 0);
+    assert.equal(await page.locator('.chip.overdue').count(), 0, 'nigdzie nie ma czerwonego terminu');
+    assert.deepEqual(problems, []);
+  } finally { await ctx.close(); }
+}));
+
+test('okno zadania: termin publikacji zapisuje się i usuwa osobno, nie rusząc terminu oddania', { skip: SKIP }, () => withSite({}, async (t) => {
+  const { ctx, page, problems, session } = await openAs(t, browser, ID.autor);
+  try {
+    await ready(page);
+    const id = taskIn(await boardOf(t, session), 'Pomysł C').id;
+    await page.locator(cardSel('Pomysł C')).click();
+    await page.waitForSelector('.sheet');
+    assert.equal(await page.locator('button', { hasText: 'Usuń publikację' }).isHidden(), true, 'bez terminu nie ma czego usuwać');
+    await page.fill('#due-input', '2026-11-05');
+    await page.locator('button', { hasText: 'Zapisz termin' }).click();
+    await page.waitForSelector('button:has-text("Usuń termin")');
+    await page.fill('#pub-input', '2026-11-12');
+    await page.locator('button', { hasText: 'Zapisz publikację' }).click();
+    await page.waitForSelector('button:has-text("Usuń publikację")');
+    await page.waitForSelector(`${cardSel('Pomysł C')} .chip:has-text("publikacja 12 lis")`);
+    let task = (await boardOf(t, session)).json.tasks.find((x) => x.id === id);
+    assert.deepEqual([task.due, task.pubDue], ['2026-11-05', '2026-11-12']);
+    assert.equal(await page.inputValue('#due-input'), '2026-11-05');
+    assert.equal(await page.inputValue('#pub-input'), '2026-11-12');
+
+    await page.locator('button', { hasText: 'Usuń publikację' }).click();
+    await page.waitForSelector(`${cardSel('Pomysł C')} .chip:has-text("publikacja")`, { state: 'detached' });
+    task = (await boardOf(t, session)).json.tasks.find((x) => x.id === id);
+    assert.deepEqual([task.due, task.pubDue], ['2026-11-05', null], 'usunięcie publikacji zostawia oddanie');
+    assert.equal(await page.inputValue('#pub-input'), '');
+
+    // błędny termin publikacji: komunikat od bota, okno zostaje otwarte
+    await page.evaluate(() => { document.querySelector('#pub-input').type = 'text'; });
+    await page.fill('#pub-input', 'premiera');
+    await page.locator('button', { hasText: 'Zapisz publikację' }).click();
+    await page.waitForSelector('.toast.error');
+    assert.match(await page.locator('.toast.error').innerText(), /Nie rozumiem terminu publikacji/);
+    assert.equal(await page.locator('.sheet').count(), 1);
+    assert.deepEqual(problems, []);
+  } finally { await ctx.close(); }
+}));
+
+test('nowe zadanie: formularz ma osobne pole terminu publikacji', { skip: SKIP }, () => withSite({}, async (t) => {
+  const { ctx, page, problems, session } = await openAs(t, browser, ID.autor);
+  try {
+    await ready(page);
+    await page.locator('.topbar .btn.primary').click();
+    await page.waitForSelector('#new-title');
+    await page.fill('#new-title', 'Premiera gry');
+    await page.fill('#new-due', '2026-11-10');
+    await page.fill('#new-pubdue', '2026-11-12');
+    await page.locator('button[type="submit"]').click();
+    await page.waitForSelector(`${cardSel('Premiera gry', 'Pomysł')} .chip:has-text("publikacja 12 lis")`);
+    const task = (await boardOf(t, session)).json.tasks.find((x) => x.name === 'Premiera gry');
+    assert.deepEqual([task.due, task.pubDue], ['2026-11-10', '2026-11-12']);
     assert.deepEqual(problems, []);
   } finally { await ctx.close(); }
 }));

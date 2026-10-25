@@ -25,6 +25,28 @@ export function dueInfo(due, today) {
   return { text: shortDate(due), tone: left <= 3 ? 'soon' : 'ok' };
 }
 
+// Plakietki terminów na karcie. Liczy się jeden termin naraz (jak na Discordzie): podczas pisania wcześniejszy z dwóch,
+// po oddaniu tekstu tylko publikacja, a dla opublikowanych żaden. Drugi termin jest tylko informacją, bez odliczania.
+// handedIn: tekst oddany (Do redakcji, Do publikacji, Opublikowane), czyli status z listy writingDone z serwera.
+export function dueChips(task, today, handedIn) {
+  if (task.status === 'Opublikowane') return [];
+  const write = task.due || null;
+  const pub = task.pubDue || null;
+  const wi = write ? dueInfo(write, today) : null;
+  const pi = pub ? dueInfo(pub, today) : null;
+  const pubChip = (i) => ({ text: `publikacja ${i.text}`, tone: i.tone, label: `Publikacja: ${i.text}` });
+  if (handedIn) {
+    if (pi) return [pubChip(pi)];
+    return wi ? [{ text: 'tekst oddany', tone: 'done', label: 'Tekst oddany' }] : [];
+  }
+  const writeChip = (i) => ({ text: i.text, tone: i.tone, label: `Termin: ${i.text}` });
+  const note = (kind, iso) => ({ text: `${kind} ${shortDate(iso)}`, tone: 'ok', label: `${kind === 'oddanie' ? 'Oddanie' : 'Publikacja'}: ${shortDate(iso)}` });
+  if (wi && pi) return write <= pub ? [writeChip(wi), note('publikacja', pub)] : [pubChip(pi), note('oddanie', write)];
+  if (wi) return [writeChip(wi)];
+  if (pi) return [pubChip(pi)];
+  return [];
+}
+
 export function initials(name) {
   const parts = String(name || '?').trim().split(/\s+/).filter(Boolean);
   const letters = parts.length > 1 ? parts[0][0] + parts[parts.length - 1][0] : (parts[0] || '?').slice(0, 2);

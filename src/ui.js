@@ -10,11 +10,11 @@ const B = require('./board');
 const NO_MENTIONS = { parse: [] };
 
 // Karta zadania: wiadomość bota w poście z podglądem (osoba, termin, priorytet) i przyciskami.
-// task: {status, assigneeId, due, urgent}
+// task: {status, assigneeId, due (oddanie tekstu), pubDue (publikacja), urgent}
 // Przyciski niosą w identyfikatorze docelową wartość (status, "pilne" włączone lub wyłączone, "weź" albo "zwolnij"),
 // więc podwójne kliknięcie (np. na wolnym telefonie) nie przesuwa zadania dwa razy ani nie cofa własnej akcji.
 function cardPayload(task) {
-  const { status, assigneeId, due, urgent } = task;
+  const { status, assigneeId, due, pubDue, urgent } = task;
   const idx = B.STATUSES.indexOf(status);
   const first = idx <= 0;
   const last = idx >= B.STATUSES.length - 1;
@@ -30,7 +30,7 @@ function cardPayload(task) {
     assigneeId
       ? new ButtonBuilder().setCustomId('kb:release').setLabel('Zwolnij').setStyle(ButtonStyle.Secondary)
       : new ButtonBuilder().setCustomId('kb:take').setLabel('Biorę to').setStyle(ButtonStyle.Success),
-    new ButtonBuilder().setCustomId('kb:due').setLabel('Termin').setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId('kb:due').setLabel('Terminy').setStyle(ButtonStyle.Secondary),
     new ButtonBuilder().setCustomId(urgent ? 'kb:urgent:off' : 'kb:urgent:on').setLabel(urgent ? 'Zdejmij pilne' : 'Pilne')
       .setStyle(urgent ? ButtonStyle.Danger : ButtonStyle.Secondary),
   ];
@@ -41,7 +41,8 @@ function cardPayload(task) {
       color: B.STATUS_COLORS[status],
       fields: [
         { name: 'Osoba', value: assigneeId ? `<@${assigneeId}>` : 'brak, kliknij „Biorę to”', inline: true },
-        { name: 'Termin', value: B.isWritingDone(status) ? (due ? `${B.fmtDate(due)} · tekst oddany` : 'tekst oddany') : (due ? B.fmtDate(due) : 'brak'), inline: true },
+        { name: 'Oddanie tekstu', value: B.isWritingDone(status) ? (due ? `${B.fmtDate(due)} · tekst oddany` : 'tekst oddany') : (due ? B.fmtDate(due) : 'brak'), inline: true },
+        { name: 'Publikacja', value: pubDue ? B.fmtDate(pubDue) : 'brak', inline: true },
         { name: 'Priorytet', value: urgent ? '🔥 pilne' : 'zwykły', inline: true },
       ],
     }],
@@ -87,26 +88,36 @@ function newTaskModal({ legacy = false } = {}) {
   const modal = new ModalBuilder().setCustomId('kb:newmodal').setTitle('Nowe zadanie');
   const title = textInput('title', { required: true, max: 100 });
   const due = textInput('due', { max: 10, placeholder: '05.11.2026, 2026-11-05 albo 05.11' });
+  const pub = textInput('pubdue', { max: 10, placeholder: 'np. premiera gry: 12.11.2026' });
   const desc = textInput('desc', { long: true, max: 1500 });
   if (legacy) {
     const row = (label, input) => new ActionRowBuilder().addComponents(input.setLabel(label));
-    return modal.addComponents(row('Tytuł', title), row('Termin (opcjonalnie)', due), row('Opis (opcjonalnie)', desc));
+    return modal.addComponents(row('Tytuł', title), row('Oddanie tekstu (opcjonalnie)', due), row('Publikacja (opcjonalnie)', pub), row('Opis (opcjonalnie)', desc));
   }
   const person = new UserSelectMenuBuilder().setCustomId('person').setMinValues(0).setMaxValues(1).setRequired(false).setPlaceholder('Kto bierze to zadanie');
   return modal.addLabelComponents(
     new LabelBuilder().setLabel('Tytuł').setTextInputComponent(title),
     new LabelBuilder().setLabel('Osoba (opcjonalnie)').setUserSelectMenuComponent(person),
-    new LabelBuilder().setLabel('Termin (opcjonalnie)').setTextInputComponent(due),
+    new LabelBuilder().setLabel('Oddanie tekstu (opcjonalnie)').setTextInputComponent(due),
+    new LabelBuilder().setLabel('Publikacja (opcjonalnie)').setTextInputComponent(pub),
     new LabelBuilder().setLabel('Opis (opcjonalnie)').setTextInputComponent(desc),
   );
 }
 
-// Okno zmiany terminu na karcie.
-function dueModal(currentDue, { legacy = false } = {}) {
-  const modal = new ModalBuilder().setCustomId('kb:duemodal').setTitle('Termin zadania');
-  const input = textInput('due', { max: 10, value: currentDue ? B.fmtDate(currentDue) : undefined, placeholder: '05.11.2026, 05.11 albo puste, żeby usunąć' });
-  if (legacy) return modal.addComponents(new ActionRowBuilder().addComponents(input.setLabel('Termin')));
-  return modal.addLabelComponents(new LabelBuilder().setLabel('Termin (puste = bez terminu)').setTextInputComponent(input));
+// Okno zmiany terminów na karcie: oddanie tekstu i publikacja. Puste pole usuwa dany termin.
+function dueModal({ due = null, pubDue = null } = {}, { legacy = false } = {}) {
+  const modal = new ModalBuilder().setCustomId('kb:duemodal').setTitle('Terminy zadania');
+  const holder = (id, value) => textInput(id, { max: 10, value: value ? B.fmtDate(value) : undefined, placeholder: '05.11.2026, 05.11 albo puste, żeby usunąć' });
+  const write = holder('due', due);
+  const publish = holder('pubdue', pubDue);
+  if (legacy) {
+    const row = (label, input) => new ActionRowBuilder().addComponents(input.setLabel(label));
+    return modal.addComponents(row('Oddanie tekstu', write), row('Publikacja', publish));
+  }
+  return modal.addLabelComponents(
+    new LabelBuilder().setLabel('Oddanie tekstu (puste = brak)').setTextInputComponent(write),
+    new LabelBuilder().setLabel('Publikacja, np. premiera (puste = brak)').setTextInputComponent(publish),
+  );
 }
 
 module.exports = { cardPayload, headerPayload, newTaskModal, dueModal };

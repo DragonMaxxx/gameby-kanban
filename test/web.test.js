@@ -108,7 +108,7 @@ test('/api/board: kolumny w kolejności, osoba, uprawnienie kierownictwa, ETag i
     assert.deepEqual(r.json.writingDone, ['Do redakcji', 'Do publikacji', 'Opublikowane'], 'serwer mówi przeglądarce, które statusy znaczą „tekst oddany”');
     assert.deepEqual(r.json.tasks.map((x) => x.name).sort(), ['Do pub E', 'Pełny F', 'Pomysł C', 'Recenzja A', 'Stary D'].sort());
     const a = taskIn(r, 'Recenzja A');
-    assert.deepEqual(Object.keys(a).sort(), ['assigneeId', 'due', 'id', 'name', 'status', 'urgent', 'url']);
+    assert.deepEqual(Object.keys(a).sort(), ['assigneeId', 'due', 'id', 'name', 'pubDue', 'status', 'urgent', 'url']);
     assert.equal(a.status, 'W pisaniu');
     assert.equal(a.assigneeId, ID.autor, 'bez osoby na karcie zadanie ma autora posta');
     assert.equal(a.url, `https://discord.com/channels/${ID.guild}/${a.id}`);
@@ -312,7 +312,7 @@ test('termin i pilne: poprawne wartości, czytelny błąd, czyszczenie, brak zmi
     const off = await t.call(s, 'POST', '/api/urgent', { id: c.id, urgent: false });
     assert.equal(off.json.task.urgent, false);
     const card = await waitFor(() => cardsIn(t.fake, c.id)[0]);
-    assert.deepEqual(card.embeds[0].fields.map((f) => f.name), ['Osoba', 'Termin', 'Priorytet']);
+    assert.deepEqual(card.embeds[0].fields.map((f) => f.name), ['Osoba', 'Oddanie tekstu', 'Publikacja', 'Priorytet']);
   } finally { await t.close(); }
 });
 
@@ -320,22 +320,26 @@ test('nowe zadanie ze strony: post na forum z tagiem, kartą, osobą i terminem;
   const t = await bootWeb();
   try {
     const s = await t.login(ID.autor);
-    const r = await t.call(s, 'POST', '/api/task', { title: '  Test ze strony  ', userId: ID.oliwia, due: '2026-11-05', description: 'Źródła w wątku' });
+    const r = await t.call(s, 'POST', '/api/task', { title: '  Test ze strony  ', userId: ID.oliwia, due: '2026-11-05', pubDue: '12.11.2026', description: 'Źródła w wątku' });
     assert.equal(r.status, 200, r.text);
     assert.equal(r.json.task.name, 'Test ze strony', 'tytuł jest przycięty');
     assert.equal(r.json.task.status, 'Przydzielone');
     assert.equal(r.json.task.assigneeId, ID.oliwia);
     assert.equal(r.json.task.due, '2026-11-05');
+    assert.equal(r.json.task.pubDue, '2026-11-12');
     const { body } = t.fake.created[0];
     assert.deepEqual(body.applied_tags, [tagId('Przydzielone')]);
     assert.equal(body.message.content, 'Źródła w wątku');
     assert.deepEqual(body.message.allowed_mentions, { parse: [] });
     const card = await waitFor(() => cardsIn(t.fake, r.json.task.id)[0]);
-    assert.deepEqual(card.embeds[0].fields.map((f) => f.value), [`<@${ID.oliwia}>`, '05.11.2026', 'zwykły']);
+    assert.deepEqual(card.embeds[0].fields.map((f) => f.value), [`<@${ID.oliwia}>`, '05.11.2026', '12.11.2026', 'zwykły']);
     assert.equal((await t.call(s, 'POST', '/api/task', { title: '   ' })).status, 400);
     assert.equal((await t.call(s, 'POST', '/api/task', { title: 'x'.repeat(101) })).status, 400);
     assert.equal((await t.call(s, 'POST', '/api/task', { title: 'ok', description: 'x'.repeat(1501) })).status, 400);
     assert.equal((await t.call(s, 'POST', '/api/task', { title: 'ok', due: 'dziwne' })).status, 400);
+    const badPub = await t.call(s, 'POST', '/api/task', { title: 'ok', pubDue: 'premiera' });
+    assert.equal(badPub.status, 400);
+    assert.match(badPub.json.error, /Nie rozumiem terminu publikacji/);
     assert.equal(t.fake.created.length, 1, 'błędne zapytania nie tworzą postów');
     const stranger = await t.call(s, 'POST', '/api/task', { title: 'ok', userId: ID.obcy });
     assert.equal(stranger.status, 400);
@@ -767,6 +771,46 @@ test('termin: brak pola nie kasuje terminu, a zapis tej samej wartości nie rusz
     const clear = await t.call(s, 'POST', '/api/due', { id, due: null });
     assert.equal(clear.status, 200);
     assert.equal(clear.json.task.due, null);
+  } finally { await t.close(); }
+});
+
+test('dwa terminy ze strony: oddanie i publikacja osobno albo razem, brak pola zostawia drugi termin, powtórka nie rusza Discorda', async () => {
+  const t = await bootWeb();
+  try {
+    const s = await t.login(ID.autor);
+    const id = taskIn(await t.call(s, 'GET', '/api/board'), 'Recenzja A').id;
+    const both = await t.call(s, 'POST', '/api/due', { id, due: '2026-11-05', pubDue: '2026-11-12' });
+    assert.equal(both.status, 200, both.text);
+    assert.deepEqual([both.json.task.due, both.json.task.pubDue], ['2026-11-05', '2026-11-12']);
+    const onlyPub = await t.call(s, 'POST', '/api/due', { id, pubDue: '13.11.2026' });
+    assert.deepEqual([onlyPub.json.task.due, onlyPub.json.task.pubDue], ['2026-11-05', '2026-11-13'], 'sama publikacja nie rusza oddania');
+    const onlyDue = await t.call(s, 'POST', '/api/due', { id, due: '06.11.2026' });
+    assert.deepEqual([onlyDue.json.task.due, onlyDue.json.task.pubDue], ['2026-11-06', '2026-11-13'], 'samo oddanie nie rusza publikacji');
+    const board = taskIn(await t.call(s, 'GET', '/api/board'), 'Recenzja A');
+    assert.deepEqual([board.due, board.pubDue], ['2026-11-06', '2026-11-13']);
+    const card = await waitFor(() => cardsIn(t.fake, id).find((m) => m.embeds[0].fields[2].value === '13.11.2026'));
+    assert.deepEqual(card.embeds[0].fields.slice(1, 3).map((f) => f.value), ['06.11.2026', '13.11.2026']);
+
+    const bad = await t.call(s, 'POST', '/api/due', { id, pubDue: 'premiera' });
+    assert.equal(bad.status, 400);
+    assert.match(bad.json.error, /Nie rozumiem terminu publikacji/);
+    const mixed = await t.call(s, 'POST', '/api/due', { id, due: '2026-12-01', pubDue: 'zły' });
+    assert.equal(mixed.status, 400);
+    assert.equal(taskIn(await t.call(s, 'GET', '/api/board'), 'Recenzja A').due, '2026-11-06', 'błąd w jednym polu nie zapisuje drugiego');
+    assert.equal((await t.call(s, 'POST', '/api/due', { id })).status, 400, 'bez żadnego pola');
+    assert.equal((await t.call(s, 'POST', '/api/due', { id, pubDue: 7 })).status, 400, 'liczba zamiast tekstu');
+    assert.equal((await t.call(s, 'POST', '/api/due', { id, pubDue: 'x'.repeat(11) })).status, 400);
+
+    const rev = t.app.bot.web.revision();
+    const edits = t.fake.requestsTo('PATCH', /^\/channels\/\d+\/messages\/\d+$/).length;
+    const same = await t.call(s, 'POST', '/api/due', { id, due: '2026-11-06', pubDue: '2026-11-13' });
+    assert.equal(same.status, 200);
+    assert.equal(t.app.bot.web.revision(), rev, 'bez zmiany tablica się nie przebudowuje');
+    assert.equal(t.fake.requestsTo('PATCH', /^\/channels\/\d+\/messages\/\d+$/).length, edits, 'bez zmiany karta nie jest edytowana');
+
+    const clear = await t.call(s, 'POST', '/api/due', { id, pubDue: null });
+    assert.deepEqual([clear.json.task.due, clear.json.task.pubDue], ['2026-11-06', null], 'usunięcie publikacji zostawia oddanie');
+    assert.equal(JSON.parse(fs.readFileSync(t.stateFile, 'utf8')).tasks[id].p, undefined, 'w stanie nie zostaje pusty klucz');
   } finally { await t.close(); }
 });
 

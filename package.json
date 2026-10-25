@@ -1,0 +1,27 @@
+{
+  "name": "gameby-kanban-bot",
+  "version": "1.0.0",
+  "description": "Kanban w Discordzie dla redakcji GameBy.pl (forum z tagami statusu).",
+  "author": "Mateusz Bartoszewicz",
+  "license": "UNLICENSED",
+  "private": true,
+  "type": "commonjs",
+  "main": "src/index.js",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "start": "node src/index.js",
+    "build": "node scripts/build.js",
+    "test": "node --test \"test/*.test.js\"",
+    "test:browser": "node --test --test-concurrency=1 \"test/browser/*.test.js\""
+  },
+  "dependencies": {
+    "discord.js": "14.27.0"
+  },
+  "devDependencies": {
+    "@discord/embedded-app-sdk": "2.3.1",
+    "esbuild": "0.25.12",
+    "ws": "8.22.0"
+  }
+}

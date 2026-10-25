@@ -1,0 +1,50 @@
+# Autor: Mateusz Bartoszewicz
+services:
+  kanban:
+    build: .
+    container_name: gameby-kanban
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      # Wewnątrz kontenera strona zawsze stoi na 8080 (na zewnątrz zmieniasz tylko HOST_PORT w .env).
+      HTTP_PORT: "8080"
+      # Token tunelu jest potrzebny tylko usłudze cloudflared. Pusta wartość tutaj nadpisuje to, co env_file wczytałby z .env,
+      # więc kompromitacja procesu bota nie ujawnia tokenu, którym można przejąć ruch całej domeny.
+      TUNNEL_TOKEN: ""
+    # Bot nie potrzebuje żadnych uprawnień systemowych (działa jako zwykły użytkownik na porcie powyżej 1024).
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    ports:
+      # Tylko ten komputer: dostęp z internetu daje wyłącznie tunel (patrz usługa cloudflared niżej).
+      - "127.0.0.1:${HOST_PORT:-8080}:8080"
+    volumes:
+      - kanban-data:/data
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # Opcjonalny tunel Cloudflare: udostępnia stronę pod adresem PUBLIC_URL bez otwierania portów na routerze.
+  # Włączenie: docker compose --profile tunnel up -d   (wymaga TUNNEL_TOKEN w .env, patrz README)
+  cloudflared:
+    image: cloudflare/cloudflared:2026.9.1
+    profiles: ["tunnel"]
+    container_name: gameby-tunnel
+    restart: unless-stopped
+    command: tunnel --no-autoupdate run
+    environment:
+      # Bez wartości domyślnej (nawet pustej) compose odmawiałby startu także tym, którzy tunelu nie używają, bo sprawdza zmienne wszystkich usług.
+      # Pusty token cloudflared zgłosi sam przy starcie (docker compose --profile tunnel logs cloudflared).
+      TUNNEL_TOKEN: ${TUNNEL_TOKEN:-}
+    depends_on:
+      - kanban
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+volumes:
+  kanban-data:

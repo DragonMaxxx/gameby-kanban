@@ -52,6 +52,10 @@ function buildCommands() {
         .addStringOption((o) => o.setName('kwota').setDescription('Kwota premii, np. 20 albo 20,50; „brak” usuwa nierozliczone premie tego tekstu').setRequired(true).setMaxLength(20))
         .addStringOption((o) => o.setName('opis').setDescription('Za co, np. post na Facebooku').setMaxLength(80)))
       .addSubcommand((c) => c
+        .setName('social')
+        .setDescription('Ustaw stałą kwotę premii za udostępnienie tekstu na social mediach (tik na karcie zadania)')
+        .addStringOption((o) => o.setName('kwota').setDescription('Kwota premii, np. 20 albo 20,50; „brak” usuwa kwotę i wyłącza zatwierdzanie premii').setRequired(true).setMaxLength(20)))
+      .addSubcommand((c) => c
         .setName('szkic')
         .setDescription('Przygotuj szkic protokołów za miesiąc i wyślij go do mnie w wiadomości prywatnej')
         .addStringOption((o) => o.setName('miesiac').setDescription('Miesiąc, np. 2026-10 albo 10.2026 (puste = poprzedni)').setMaxLength(10)))),

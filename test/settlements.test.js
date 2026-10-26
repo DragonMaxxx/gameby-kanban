@@ -195,10 +195,10 @@ test('/rozliczenia premia: dopisuje się do tekstu, trafia do miesiąca tekstu, 
     assert.notEqual(metaOf(t, a.id).b[0].i, metaOf(t, a.id).b[1].i, 'każda premia ma własny numer');
     // nic z tego nie widać na stronie z tablicą ani na karcie
     const snapshot = await t.bot.web.board();
-    for (const task of snapshot.tasks) assert.deepEqual(Object.keys(task).sort(), ['assigneeId', 'due', 'id', 'name', 'pubDue', 'status', 'urgent', 'url']);
+    for (const task of snapshot.tasks) assert.deepEqual(Object.keys(task).sort(), ['assigneeId', 'due', 'id', 'name', 'pubDue', 'social', 'status', 'urgent', 'url']);
     assert.doesNotMatch(JSON.stringify(snapshot), /zł|\d,\d\d|premi|stawk|"(b|h|s|amount|rate)"/i);
     const cards = t.fake.messagesOf(a.id).filter((m) => m.components.length);
-    assert.doesNotMatch(JSON.stringify(cards), /zł|\d,\d\d|premi|stawk/i);
+    assert.doesNotMatch(JSON.stringify(cards), /zł|\d,\d\d|stawk|kwot/i, 'karta może mieć przycisk premii za social, ale żadnej kwoty');
     // błędne dane i brak uprawnień
     assert.match(textOf(await t.rozl(ID.szef, 'premia', [opt('kwota', 'dużo')], a.id)), /Nie rozumiem kwoty premii/);
     assert.match(textOf(await t.rozl(ID.szef, 'premia', [opt('kwota', '10')], ID.ogolne)), /działają tylko w postach na forum/);
@@ -598,7 +598,7 @@ test('rozliczenia nie zmieniają zwykłych zadań: karty, tablica i podsumowanie
     await t.rozl(ID.szef, 'premia', [opt('kwota', '20')], a.id);
     const board = JSON.stringify(((await t.fake.command(ID.autor, 'tablica')).find((e) => e.kind === 'edit') || {}).body);
     const digest = JSON.stringify(((await t.fake.command(ID.autor, 'podsumowanie')).find((e) => e.kind === 'edit') || {}).body);
-    for (const text of [board, digest, JSON.stringify(t.fake.messagesOf(a.id))]) assert.doesNotMatch(plain(text), /\d,\d\d|zł|premi|stawk/i);
+    for (const text of [board, digest, JSON.stringify(t.fake.messagesOf(a.id))]) assert.doesNotMatch(plain(text), /\d,\d\d|zł|stawk|kwot/i);
     assert.equal(t.fake.dmChannelOf(ID.oliwia), null, 'żadnych wiadomości do osób bez zatwierdzenia');
   } finally { await t.close(); }
 });
@@ -637,3 +637,223 @@ test('szkic dla wielu osób: PDF-y idą po 10 w wiadomości, a podsumowanie mie�
     assert.equal(flat(dm[3]).find((c) => c.custom_id === 'kb:fin:send:2026-10').label, 'Wyślij do osób (30)');
   } finally { await t.close(); }
 });
+
+// ---------------------------------------------------------------- premia za social (tik na karcie)
+
+const cardOf = (t, th) => t.fake.messagesOf(th.id).filter((m) => m.components && m.components.length).at(-1);
+const socialIds = (card) => (card.components[3] ? card.components[3].components.map((c) => c.custom_id) : []);
+const fieldOf = (card, name) => ((card.embeds[0] || {}).fields || []).find((f) => f.name === name);
+const tap = (t, user, th, id) => t.fake.component(user, th.id, id, { type: 2 });
+const denied = (events) => plain(events.find((e) => e.kind === 'followup')?.body?.content ?? '');
+// Karta w poście powstaje po komendzie /panel użytej w poście.
+async function makeCard(t, th) {
+  await t.fake.command(ID.oliwia, 'panel', [], th.id);
+  return cardOf(t, th);
+}
+
+test('premia za social: komenda ustawia stałą kwotę (tylko zarząd), lista stawek ją pokazuje, „brak” ją usuwa', async () => {
+  const t = await setup();
+  try {
+    assert.match(textOf(await t.rozl(ID.szef, 'stawki')), /Premia za social: nie ustawiono/);
+    assert.match(textOf(await t.rozl(ID.szef, 'social', [opt('kwota', 'dużo')])), /Nie rozumiem kwoty/);
+    assert.match(textOf(await t.rozl(ID.oliwia, 'social', [opt('kwota', '20')])), /tylko dla zarządu/);
+    assert.equal(finOf(t), undefined, 'odmowa nic nie zapisuje');
+    assert.match(textOf(await t.rozl(ID.szef, 'social', [opt('kwota', '20')])), /Premia za social: 20,00 zł \(jedna stała kwota dla wszystkich\)/);
+    assert.equal(finOf(t).social, 2000);
+    assert.match(textOf(await t.rozl(ID.szef, 'stawki')), /Premia za social: 20,00 zł \(stała\)/);
+    assert.match(textOf(await t.rozl(ID.szef, 'social', [opt('kwota', 'brak')])), /Usunięto kwotę premii za social/);
+    assert.equal(finOf(t).social, 0);
+    assert.match(textOf(await t.rozl(ID.szef, 'social', [opt('kwota', 'brak')])), /nie ma ustawionej kwoty/);
+  } finally { await t.close(); }
+});
+
+test('premia za social: bez rozliczeń karta wygląda jak dawniej, a przycisk nic nie robi', async () => {
+  const t = await setup({ env: { FINANCE_USER_IDS: '' } });
+  try {
+    const th = t.fake.addThread({ name: 'Tekst', owner: ID.oliwia, status: 'W pisaniu' });
+    const card = await makeCard(t, th);
+    assert.equal(card.components.length, 3, 'bez rozliczeń nie ma czwartego rzędu');
+    assert.equal(fieldOf(card, 'Premia za social'), undefined);
+    assert.match(denied(await tap(t, ID.oliwia, th, 'kb:social:on')), /Rozliczenia są wyłączone/);
+    assert.equal(metaOf(t, th.id)?.x, undefined);
+    const board = await t.bot.web.board();
+    assert.deepEqual(board.tasks.map((x) => x.social), board.tasks.map(() => null), 'strona nie dostaje stanu premii');
+  } finally { await t.close(); }
+});
+
+test('premia za social: osoba z zadania zgłasza i cofa, obca osoba i zatwierdzanie bez uprawnień są odrzucone, na karcie nie ma kwoty', async () => {
+  const t = await setup();
+  try {
+    await t.rozl(ID.szef, 'social', [opt('kwota', '20')]);
+    const th = t.fake.addThread({ name: 'Recenzja social', owner: ID.oliwia, status: 'W pisaniu' });
+    let card = await makeCard(t, th);
+    assert.deepEqual(socialIds(card), ['kb:social:on']);
+    assert.equal(fieldOf(card, 'Premia za social'), undefined, 'bez zgłoszenia nie ma pola');
+
+    assert.match(denied(await tap(t, ID.autor, th, 'kb:social:on')), /zgłasza osoba przypisana do zadania/);
+    assert.equal(metaOf(t, th.id)?.x, undefined, 'obca osoba nic nie zmieniła');
+
+    await tap(t, ID.oliwia, th, 'kb:social:on');
+    card = cardOf(t, th);
+    assert.equal(metaOf(t, th.id).x, true);
+    assert.equal(metaOf(t, th.id).b, undefined, 'zgłoszenie nie jest jeszcze premią');
+    assert.match(fieldOf(card, 'Premia za social').value, /zgłoszona, czeka na zatwierdzenie/);
+    assert.deepEqual(socialIds(card), ['kb:social:off', 'kb:social:ok']);
+    await tap(t, ID.oliwia, th, 'kb:social:on'); // podwójne kliknięcie
+    assert.equal(metaOf(t, th.id).x, true);
+
+    assert.match(denied(await tap(t, ID.oliwia, th, 'kb:social:ok')), /zatwierdza tylko zarząd/);
+    assert.match(denied(await tap(t, ID.autor, th, 'kb:social:off')), /cofa osoba przypisana do zadania albo zarząd/);
+    assert.equal(metaOf(t, th.id).x, true);
+
+    await tap(t, ID.oliwia, th, 'kb:social:off');
+    card = cardOf(t, th);
+    assert.equal(metaOf(t, th.id)?.x, undefined, 'po cofnięciu w stanie nie zostaje ślad');
+    assert.equal(fieldOf(card, 'Premia za social'), undefined);
+    assert.deepEqual(socialIds(card), ['kb:social:on']);
+    assert.doesNotMatch(JSON.stringify(t.fake.messagesOf(th.id)), /zł|\d,\d\d|stawk|kwot/i, 'karta nie zawiera kwot');
+  } finally { await t.close(); }
+});
+
+test('premia za social: zarząd zatwierdza od razu z karty, kwota zapisuje się w chwili zatwierdzenia, usuwa tylko zarząd', async () => {
+  const t = await setup();
+  try {
+    const th = t.fake.addThread({ name: 'Recenzja social', owner: ID.oliwia, status: 'W pisaniu' });
+    await makeCard(t, th);
+    assert.match(denied(await tap(t, ID.szef, th, 'kb:social:on')), /Najpierw ustaw kwotę premii za social/);
+    assert.equal(metaOf(t, th.id)?.b, undefined);
+
+    await t.rozl(ID.szef, 'social', [opt('kwota', '20')]);
+    await tap(t, ID.szef, th, 'kb:social:on');
+    let card = cardOf(t, th);
+    const b = metaOf(t, th.id).b;
+    assert.equal(b.length, 1);
+    assert.deepEqual([b[0].a, b[0].n, b[0].m, b[0].k, b[0].s], [2000, 'udostępnienie w social mediach', '2026-10', 'social', undefined]);
+    assert.equal(metaOf(t, th.id).x, undefined);
+    assert.match(fieldOf(card, 'Premia za social').value, /zatwierdzona/);
+    assert.deepEqual(socialIds(card), ['kb:social:off']);
+    await tap(t, ID.szef, th, 'kb:social:on'); // drugie kliknięcie nie dubluje premii
+    assert.equal(metaOf(t, th.id).b.length, 1);
+
+    // późniejsza zmiana stałej kwoty nie rusza zatwierdzonej premii
+    await t.rozl(ID.szef, 'social', [opt('kwota', '30')]);
+    assert.equal(metaOf(t, th.id).b[0].a, 2000);
+
+    assert.match(denied(await tap(t, ID.oliwia, th, 'kb:social:off')), /Zatwierdzoną premię za social usuwa tylko zarząd/);
+    assert.equal(metaOf(t, th.id).b.length, 1);
+    await tap(t, ID.szef, th, 'kb:social:off');
+    card = cardOf(t, th);
+    assert.equal(metaOf(t, th.id).b, undefined, 'pusta lista premii nie zostaje w stanie');
+    assert.deepEqual(socialIds(card), ['kb:social:on']);
+
+    // zadanie bez osoby nie ma komu przyznać premii
+    const free = t.fake.addThread({ name: 'Bez osoby', owner: ID.app, status: 'Pomysł' });
+    t.fake.messages.set(free.id, [t.fake.makeMessage(free.id, free.id, ID.app, 'x')]);
+    await t.fake.component(ID.szef, free.id, 'kb:urgent:on', { type: 2 });
+    assert.match(denied(await tap(t, ID.szef, free, 'kb:social:on')), /Najpierw przydziel osobę/);
+  } finally { await t.close(); }
+});
+
+test('premia za social na szkicu: zgłoszenia czekają w menu, zatwierdzone wchodzą do protokołu, reszta zostaje na następny miesiąc', async () => {
+  const t = await setup();
+  try {
+    const { a, b, c } = await octoberBoard(t);
+    await t.rate(ID.oliwia, '150', 'Oliwia Nowak');
+    await t.rozl(ID.szef, 'social', [opt('kwota', '20')]);
+    await tap(t, ID.oliwia, a, 'kb:social:on');
+    await tap(t, ID.autor, c, 'kb:social:on'); // osoba bez stawki
+    await draftForOctober(t);
+
+    const draft = t.draftMsg();
+    assert.match(plain(draft.content), /Oliwia Nowak \(<@\d+>\): 2 teksty, razem 300,00 zł/, 'zgłoszenie jeszcze nie jest w kwocie');
+    assert.match(plain(draft.content), /Zgłoszone premie za social do zatwierdzenia: 2\./);
+    const menu = flat(draft).find((x) => x.custom_id === 'kb:fin:social:2026-10');
+    assert.deepEqual(menu.options.map((o) => o.label), ['News C', 'Recenzja A']);
+    assert.deepEqual(menu.options.map((o) => o.description), ['zgłoszenie osoby bez stawki', 'zgłasza: Oliwia Nowak']);
+
+    // numer spoza zgłoszeń (Poradnik B nie ma zgłoszenia) jest ignorowany, zatwierdzenie dotyczy tylko zaznaczonych
+    await t.press('kb:fin:social:2026-10', { type: 3, values: [a.id, b.id] });
+    const fresh = await t.newDraftAfter(draft);
+    assert.ok(fresh);
+    assert.match(plain(fresh.content), /Oliwia Nowak \(<@\d+>\): 2 teksty, 1 premia, razem 320,00 zł/);
+    assert.match(plain(fresh.content), /Zgłoszone premie za social do zatwierdzenia: 1\./);
+    const bonus = metaOf(t, a.id).b[0];
+    assert.deepEqual([bonus.a, bonus.m, bonus.k], [2000, '2026-10', 'social']);
+    assert.equal(metaOf(t, a.id).x, undefined, 'zgłoszenie zamienione na premię');
+    assert.equal(metaOf(t, b.id)?.b, undefined, 'Poradnik B nie dostał premii');
+    assert.equal(socialState(t, a), 'ok');
+
+    // przy zatwierdzaniu bot ostrzega, że zgłoszenie osoby bez stawki zostaje
+    const confirm = await t.press('kb:fin:send:2026-10', { messageId: fresh.id });
+    assert.match(plain(editOf(confirm).content), /Niezatwierdzone zgłoszenia premii za social \(1\) nie wejdą do protokołów; zostają na następny szkic/);
+    await t.press('kb:fin:yes:2026-10', { messageId: fresh.id });
+    await waitFor(() => finOf(t).months['2026-10'].state === 'sent');
+    const pdf = pdfText(t.fake.attachmentsOf(await waitFor(() => t.dm(ID.oliwia)[0]))[0].data);
+    if (pdf !== null) {
+      assert.match(pdf, /udostępnienie/); // opis zawija się w komórce tabeli, więc sprawdzamy jego początek i koniec osobno
+      assert.match(pdf, /mediach/);
+      assert.match(pdf, /Razem do wypłaty\s+320,00\s+zł/);
+    }
+
+    // rozliczona premia jest zamrożona, niezatwierdzone zgłoszenie czeka dalej
+    assert.equal(metaOf(t, a.id).b[0].s, '2026-10');
+    assert.equal(socialState(t, a), 'settled');
+    assert.match(denied(await tap(t, ID.szef, a, 'kb:social:off')), /już rozliczona w zatwierdzonym protokole/);
+    assert.equal(metaOf(t, c.id).x, true, 'zgłoszenie osoby bez stawki zostaje na następny szkic');
+    assert.equal(socialState(t, c), 'claimed');
+  } finally { await t.close(); }
+});
+
+test('premia za social na szkicu: menu pomija zgłoszenia, które zmieniły się po utworzeniu szkicu (cofnięte albo całkiem nowe)', async () => {
+  const t = await setup();
+  try {
+    const { a, c } = await octoberBoard(t);
+    await t.rate(ID.oliwia, '150', 'Oliwia Nowak');
+    await t.rozl(ID.szef, 'social', [opt('kwota', '20')]);
+    await tap(t, ID.oliwia, a, 'kb:social:on');
+    await tap(t, ID.autor, c, 'kb:social:on');
+    await draftForOctober(t);
+    const draft = t.draftMsg();
+    assert.match(plain(draft.content), /Zgłoszone premie za social do zatwierdzenia: 2\./);
+
+    // Autor cofa zgłoszenie już po utworzeniu szkicu, a Oliwia zgłasza drugi tekst, którego szkic jeszcze nie zna.
+    await tap(t, ID.autor, c, 'kb:social:off');
+    assert.equal(metaOf(t, c.id)?.x, undefined);
+    const late = t.fake.addThread({ name: 'Spóźniony social', owner: ID.oliwia, status: 'W pisaniu' });
+    await makeCard(t, late);
+    await tap(t, ID.oliwia, late, 'kb:social:on');
+    assert.equal(metaOf(t, late.id).x, true);
+
+    // Stare menu nadal wysyła numery obu zadań (a nawet cudzy numer): nic z tego nie może stać się premią.
+    await t.press('kb:fin:social:2026-10', { type: 3, values: [c.id, late.id, '999999999999999999'] });
+    assert.equal(metaOf(t, c.id)?.b, undefined, 'cofnięte zgłoszenie nie staje się premią');
+    assert.equal(metaOf(t, late.id).b, undefined, 'zgłoszenie spoza szkicu nie staje się premią');
+    assert.equal(metaOf(t, late.id).x, true, 'nowe zgłoszenie czeka na swój szkic');
+    assert.equal(socialState(t, a), 'claimed', 'niezaznaczone zgłoszenie też zostaje');
+  } finally { await t.close(); }
+});
+
+test('premia za social: w szkicu bez kwoty menu nic nie zatwierdza, a samo zgłoszenie wystarcza, żeby miesiąc dostał szkic', async () => {
+  const t = await setup();
+  try {
+    const a = t.fake.addThread({ name: 'Recenzja social', owner: ID.oliwia, status: 'W pisaniu' });
+    await makeCard(t, a);
+    await t.rate(ID.oliwia, '150', 'Oliwia Nowak');
+    await tap(t, ID.oliwia, a, 'kb:social:on');
+    await draftForOctober(t); // bez oddanych tekstów, ale ze zgłoszeniem: szkic powstaje
+    const draft = t.draftMsg();
+    assert.ok(draft, 'zgłoszenie samo wystarcza do szkicu');
+    assert.match(plain(draft.content), /Zgłoszone premie za social do zatwierdzenia: 1\./);
+    const events = await t.press('kb:fin:social:2026-10', { type: 3, values: [a.id] });
+    assert.match(plain(events.find((e) => e.kind === 'followup')?.body?.content ?? ''), /Najpierw ustaw kwotę premii za social/);
+    assert.equal(metaOf(t, a.id).x, true, 'bez kwoty nic się nie zmieniło');
+  } finally { await t.close(); }
+});
+
+// Stan premii wyliczony ze stanu zapisanego na dysku, tak samo jak robi to bot dla karty i strony.
+function socialState(t, th) {
+  const m = metaOf(t, th.id) || {};
+  const list = (m.b || []).filter((x) => x.k === 'social');
+  if (list.length) return list.some((x) => x.s) ? 'settled' : 'ok';
+  return m.x ? 'claimed' : 'none';
+}

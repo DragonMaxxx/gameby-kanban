@@ -108,7 +108,7 @@ test('/api/board: kolumny w kolejności, osoba, uprawnienie kierownictwa, ETag i
     assert.deepEqual(r.json.writingDone, ['Do redakcji', 'Do publikacji', 'Opublikowane'], 'serwer mówi przeglądarce, które statusy znaczą „tekst oddany”');
     assert.deepEqual(r.json.tasks.map((x) => x.name).sort(), ['Do pub E', 'Pełny F', 'Pomysł C', 'Recenzja A', 'Stary D'].sort());
     const a = taskIn(r, 'Recenzja A');
-    assert.deepEqual(Object.keys(a).sort(), ['assigneeId', 'due', 'id', 'name', 'pubDue', 'status', 'urgent', 'url']);
+    assert.deepEqual(Object.keys(a).sort(), ['assigneeId', 'due', 'id', 'name', 'pubDue', 'social', 'status', 'urgent', 'url']);
     assert.equal(a.status, 'W pisaniu');
     assert.equal(a.assigneeId, ID.autor, 'bez osoby na karcie zadanie ma autora posta');
     assert.equal(a.url, `https://discord.com/channels/${ID.guild}/${a.id}`);
@@ -313,6 +313,50 @@ test('termin i pilne: poprawne wartości, czytelny błąd, czyszczenie, brak zmi
     assert.equal(off.json.task.urgent, false);
     const card = await waitFor(() => cardsIn(t.fake, c.id)[0]);
     assert.deepEqual(card.embeds[0].fields.map((f) => f.name), ['Osoba', 'Oddanie tekstu', 'Publikacja', 'Priorytet']);
+  } finally { await t.close(); }
+});
+
+test('premia za social na stronie: stan widać dla wszystkich, zgłasza osoba z zadania, zatwierdza zarząd, kwot nigdzie nie ma', async () => {
+  const t = await bootWeb({ env: { FINANCE_USER_IDS: ID.szef } });
+  try {
+    const autor = await t.login(ID.autor);
+    const oliwia = await t.login(ID.oliwia);
+    const szef = await t.login(ID.szef);
+    const board = await t.call(autor, 'GET', '/api/board');
+    const a = taskIn(board, 'Recenzja A'); // post Autora
+    assert.deepEqual(board.json.tasks.map((x) => x.social), board.json.tasks.map(() => 'none'));
+    assert.equal(board.json.me.finance, false);
+    assert.equal((await t.call(szef, 'GET', '/api/board')).json.me.finance, true);
+
+    const bad = await t.call(autor, 'POST', '/api/social', { id: a.id, action: 'tak' });
+    assert.equal(bad.status, 400);
+    assert.match(bad.json.error, /Nieprawidłowe: premia za social/, 'zła akcja jest odrzucana już przez serwer, zanim bot sięgnie po post');
+    assert.equal((await t.call(autor, 'POST', '/api/social', { id: 'abc', action: 'on' })).status, 400);
+    const stranger = await t.call(oliwia, 'POST', '/api/social', { id: a.id, action: 'on' });
+    assert.equal(stranger.status, 403);
+    assert.match(stranger.json.error, /zgłasza osoba przypisana do zadania/);
+
+    const claimed = await t.call(autor, 'POST', '/api/social', { id: a.id, action: 'on' });
+    assert.equal(claimed.status, 200, claimed.text);
+    assert.equal(claimed.json.task.social, 'claimed');
+    assert.deepEqual(Object.keys(claimed.json.task).sort(), ['assigneeId', 'due', 'id', 'name', 'pubDue', 'social', 'status', 'urgent', 'url'], 'odpowiedź na akcję ma te same pola co tablica, bez kwot');
+    assert.equal(taskIn(await t.call(oliwia, 'GET', '/api/board'), 'Recenzja A').social, 'claimed', 'stan widzą wszyscy');
+    const card = await waitFor(() => cardsIn(t.fake, a.id)[0]);
+    assert.match(card.embeds[0].fields.find((f) => f.name === 'Premia za social').value, /zgłoszona/);
+
+    assert.equal((await t.call(autor, 'POST', '/api/social', { id: a.id, action: 'ok' })).status, 403);
+    const noAmount = await t.call(szef, 'POST', '/api/social', { id: a.id, action: 'ok' });
+    assert.equal(noAmount.status, 400);
+    assert.match(noAmount.json.error, /Najpierw ustaw kwotę premii za social/);
+
+    await t.fake.command(ID.szef, 'rozliczenia', [{ name: 'social', type: 1, options: [{ name: 'kwota', type: 3, value: '20' }] }]);
+    const ok = await t.call(szef, 'POST', '/api/social', { id: a.id, action: 'ok' });
+    assert.equal(ok.json.task.social, 'ok');
+    assert.equal((await t.call(autor, 'POST', '/api/social', { id: a.id, action: 'off' })).status, 403, 'zatwierdzoną premię usuwa tylko zarząd');
+    const final = await t.call(autor, 'GET', '/api/board');
+    assert.doesNotMatch(JSON.stringify([ok.json, final.json]), /\d,\d\d|zł|"amount"/i, 'strona zna stan premii, ale nie kwotę');
+    const off = await t.call(szef, 'POST', '/api/social', { id: a.id, action: 'off' });
+    assert.equal(off.json.task.social, 'none');
   } finally { await t.close(); }
 });
 

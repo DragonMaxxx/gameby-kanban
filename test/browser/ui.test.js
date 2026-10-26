@@ -415,6 +415,59 @@ test('okno zadania: status, osoba, termin i pilne zapisują się w Discordzie', 
   } finally { await ctx.close(); }
 }));
 
+test('okno zadania: premia za social (zgłoszenie osoby, zatwierdzenie zarządu) pokazuje stan bez kwoty, a bez rozliczeń pola nie ma', { skip: SKIP }, async () => {
+  // bez rozliczeń: okno nie ma pola, karta nie ma plakietki
+  await withSite({}, async (t) => {
+    const { ctx, page, problems } = await openAs(t, browser, ID.autor);
+    try {
+      await ready(page);
+      await page.locator(cardSel('Recenzja A')).click();
+      await page.waitForSelector('.sheet');
+      assert.equal(await page.locator('#social-field').isVisible(), false);
+      assert.deepEqual(problems, []);
+    } finally { await ctx.close(); }
+  });
+
+  await withSite({ env: { FINANCE_USER_IDS: ID.szef } }, async (t) => {
+    await t.fake.command(ID.szef, 'rozliczenia', [{ name: 'social', type: 1, options: [{ name: 'kwota', type: 3, value: '20' }] }]);
+    const author = await openAs(t, browser, ID.autor);
+    const boss = await openAs(t, browser, ID.szef);
+    const other = await openAs(t, browser, ID.oliwia);
+    try {
+      await ready(author.page);
+      await ready(boss.page);
+      await ready(other.page);
+      // osoba z zadania zgłasza premię w oknie zadania
+      await author.page.locator(cardSel('Recenzja A')).click();
+      await author.page.waitForSelector('#social-field');
+      assert.equal(await author.page.locator('#social-input').isChecked(), false);
+      assert.equal(await author.page.locator('#social-ok').isVisible(), false);
+      await author.page.locator('#social-input').check();
+      await author.page.waitForSelector(`${cardSel('Recenzja A')} .chip:has-text("social: zgłoszone")`);
+      assert.match(await author.page.locator('#social-status').innerText(), /zgłoszone, czeka na zatwierdzenie/);
+      assert.equal(await author.page.locator('#social-ok').isVisible(), false, 'przycisk zatwierdzania jest tylko dla zarządu');
+      // plakietkę widzą wszyscy, ale osoba spoza zadania nie może zmienić pola
+      await other.page.waitForSelector(`${cardSel('Recenzja A')} .chip:has-text("social: zgłoszone")`);
+      await other.page.locator(cardSel('Recenzja A')).click();
+      await other.page.waitForSelector('#social-field');
+      assert.equal(await other.page.locator('#social-input').isDisabled(), true);
+      // zarząd zatwierdza
+      await boss.page.waitForSelector(`${cardSel('Recenzja A')} .chip:has-text("social: zgłoszone")`);
+      await boss.page.locator(cardSel('Recenzja A')).click();
+      await boss.page.waitForSelector('#social-ok');
+      await boss.page.locator('#social-ok').click();
+      await boss.page.waitForSelector(`${cardSel('Recenzja A')} .chip:has-text("social ✓")`);
+      await author.page.waitForSelector(`${cardSel('Recenzja A')} .chip:has-text("social ✓")`);
+      assert.equal(await author.page.locator('#social-input').isDisabled(), true, 'zatwierdzoną premię cofa tylko zarząd');
+      assert.doesNotMatch(await author.page.locator('body').innerText(), /\d,\d\d\s*zł|zł/);
+      // zarząd odznacza: premia znika ze strony
+      await boss.page.locator('#social-input').uncheck();
+      await boss.page.waitForSelector(`${cardSel('Recenzja A')} .chip:has-text("social")`, { state: 'detached' });
+      assert.deepEqual([...author.problems, ...boss.problems, ...other.problems], []);
+    } finally { await author.ctx.close(); await boss.ctx.close(); await other.ctx.close(); }
+  });
+});
+
 test('okno zadania: "Biorę to" i "Zwolnij" oraz błąd serwera pokazany jako komunikat', { skip: SKIP }, () => withSite({}, async (t) => {
   const { ctx, page, session } = await openAs(t, browser, ID.oliwia);
   try {

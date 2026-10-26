@@ -9,12 +9,24 @@ const B = require('./board');
 
 const NO_MENTIONS = { parse: [] };
 
+// Premia za social: przyciski niosą docelową akcję, więc podwójne kliknięcie nic nie psuje. Zgłasza osoba z zadania (albo zarząd, wtedy od razu zatwierdza),
+// zatwierdza zarząd, cofa osoba (zgłoszenie) albo zarząd (też zatwierdzoną); reguły sprawdza moduł rozliczeń przy kliknięciu, a nie karta.
+const SOCIAL_FIELD = { claimed: 'zgłoszona, czeka na zatwierdzenie', ok: '✓ zatwierdzona', settled: '✓ rozliczona' };
+function socialButtons(social) {
+  const btn = (id, label, style = ButtonStyle.Secondary) => new ButtonBuilder().setCustomId(id).setLabel(label).setStyle(style);
+  if (social === 'claimed') return [btn('kb:social:off', 'Social: cofnij zgłoszenie'), btn('kb:social:ok', 'Zatwierdź social', ButtonStyle.Success)];
+  if (social === 'ok') return [btn('kb:social:off', 'Social ✓ (usuń premię)')];
+  if (social === 'settled') return [btn('kb:social:off', 'Social ✓ (rozliczone)').setDisabled(true)];
+  return [btn('kb:social:on', 'Premia za social')];
+}
+
 // Karta zadania: wiadomość bota w poście z podglądem (osoba, termin, priorytet) i przyciskami.
-// task: {status, assigneeId, due (oddanie tekstu), pubDue (publikacja), urgent}
+// task: {status, assigneeId, due (oddanie tekstu), pubDue (publikacja), urgent, social}
+// social: null (rozliczenia wyłączone: karta bez premii) albo none, claimed (zgłoszona), ok (zatwierdzona), settled (rozliczona); nigdy kwota
 // Przyciski niosą w identyfikatorze docelową wartość (status, "pilne" włączone lub wyłączone, "weź" albo "zwolnij"),
 // więc podwójne kliknięcie (np. na wolnym telefonie) nie przesuwa zadania dwa razy ani nie cofa własnej akcji.
 function cardPayload(task) {
-  const { status, assigneeId, due, pubDue, urgent } = task;
+  const { status, assigneeId, due, pubDue, urgent, social = null } = task;
   const idx = B.STATUSES.indexOf(status);
   const first = idx <= 0;
   const last = idx >= B.STATUSES.length - 1;
@@ -35,22 +47,23 @@ function cardPayload(task) {
       .setStyle(urgent ? ButtonStyle.Danger : ButtonStyle.Secondary),
   ];
   const assign = new UserSelectMenuBuilder().setCustomId('kb:assign').setPlaceholder('Przydziel osobę').setMinValues(1).setMaxValues(1);
+  const fields = [
+    { name: 'Osoba', value: assigneeId ? `<@${assigneeId}>` : 'brak, kliknij „Biorę to”', inline: true },
+    { name: 'Oddanie tekstu', value: B.isWritingDone(status) ? (due ? `${B.fmtDate(due)} · tekst oddany` : 'tekst oddany') : (due ? B.fmtDate(due) : 'brak'), inline: true },
+    { name: 'Publikacja', value: pubDue ? B.fmtDate(pubDue) : 'brak', inline: true },
+    { name: 'Priorytet', value: urgent ? '🔥 pilne' : 'zwykły', inline: true },
+  ];
+  if (social && social !== 'none') fields.push({ name: 'Premia za social', value: SOCIAL_FIELD[social], inline: true });
+  const rows = [
+    new ActionRowBuilder().addComponents(select),
+    new ActionRowBuilder().addComponents(...buttons),
+    new ActionRowBuilder().addComponents(assign),
+  ];
+  if (social) rows.push(new ActionRowBuilder().addComponents(...socialButtons(social)));
   return {
     content: `Status: **${status}**`,
-    embeds: [{
-      color: B.STATUS_COLORS[status],
-      fields: [
-        { name: 'Osoba', value: assigneeId ? `<@${assigneeId}>` : 'brak, kliknij „Biorę to”', inline: true },
-        { name: 'Oddanie tekstu', value: B.isWritingDone(status) ? (due ? `${B.fmtDate(due)} · tekst oddany` : 'tekst oddany') : (due ? B.fmtDate(due) : 'brak'), inline: true },
-        { name: 'Publikacja', value: pubDue ? B.fmtDate(pubDue) : 'brak', inline: true },
-        { name: 'Priorytet', value: urgent ? '🔥 pilne' : 'zwykły', inline: true },
-      ],
-    }],
-    components: [
-      new ActionRowBuilder().addComponents(select),
-      new ActionRowBuilder().addComponents(...buttons),
-      new ActionRowBuilder().addComponents(assign),
-    ],
+    embeds: [{ color: B.STATUS_COLORS[status], fields }],
+    components: rows,
     allowedMentions: NO_MENTIONS,
   };
 }

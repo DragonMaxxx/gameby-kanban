@@ -52,6 +52,8 @@ export function createActions({ store, markMoved, onSettled }) {
     // fields: { due } (oddanie tekstu) i/lub { pubDue } (publikacja); pusty tekst usuwa termin, brak pola zostawia go bez zmian
     due: (task, fields) => mutate(() => post('/api/due', { id: task.id, ...fields })),
     urgent: (task, urgent) => mutate(() => post('/api/urgent', { id: task.id, urgent: Boolean(urgent) })),
+    // action: 'on' (zgłoś; zarząd zatwierdza od razu), 'ok' (zatwierdź, tylko zarząd), 'off' (cofnij zgłoszenie albo usuń premię); reguły sprawdza bot
+    social: (task, action) => mutate(() => post('/api/social', { id: task.id, action })),
     create: (fields) => mutate(async () => {
       const task = await post('/api/task', fields);
       markMoved(task.id);

@@ -189,12 +189,13 @@ function createBot({ client, config, store, now = () => new Date(), log = consol
   // p (termin publikacji), u (pilne), c (id wiadomości z kartą). Brak klucza a lub d oznacza "nie ustawiono": wtedy sięgamy
   // po domyślne wartości. Termin publikacji ustawia się tylko na karcie, komendą albo na stronie (z postów go nie czytamy).
   // Rozliczenia (tylko dla zarządu, nigdy na kartę ani stronę): h (data oddania do redakcji), s (miesiąc rozliczenia tekstu),
-  // b (lista premii: i, a w groszach, n, m miesiąc, s miesiąc rozliczenia).
+  // b (lista premii: i, a w groszach, n, m miesiąc, s miesiąc rozliczenia, k: 'social' dla premii za social), x (zgłoszona premia za social,
+  // czeka na zarząd). Kwot nie pokazujemy nigdzie poza zarządem, ale sam stan premii za social (brak, zgłoszona, zatwierdzona) widać na karcie i stronie.
   const metaOf = (id) => (store.get('tasks') || {})[id];
   function patchMeta(id, patch) {
     const all = { ...(store.get('tasks') || {}) };
     const next = { ...(all[id] || {}), ...patch };
-    for (const k of ['p', 'h', 's']) if (!next[k]) delete next[k]; // puste wartości nie zostawiają śladu w stanie (w odróżnieniu od d, gdzie brak klucza znaczy "nie ustawiono")
+    for (const k of ['p', 'h', 's', 'x']) if (!next[k]) delete next[k]; // puste wartości nie zostawiają śladu w stanie (w odróżnieniu od d, gdzie brak klucza znaczy "nie ustawiono")
     if (!next.b || !next.b.length) delete next.b;
     all[id] = next;
     store.set('tasks', all);
@@ -239,7 +240,7 @@ function createBot({ client, config, store, now = () => new Date(), log = consol
       if (needA && meta.assigneeId) assigneeId = meta.assigneeId;
       if (needD) due = meta.due;
     }
-    return { status, assigneeId, due, pubDue: m.p || null, urgent: Boolean(m.u), ok };
+    return { status, assigneeId, due, pubDue: m.p || null, urgent: Boolean(m.u), social: settlements.socialState(thread.id), ok };
   }
 
   async function fetchArchivedThreads(forum) {
@@ -281,7 +282,7 @@ function createBot({ client, config, store, now = () => new Date(), log = consol
       const batch = await Promise.all(all.slice(i, i + 5).map(async (t) => {
         const r = await resolveTask(t, st, day);
         return {
-          id: t.id, name: t.name, url: t.url, status: r.status, assigneeId: r.assigneeId, due: r.due, pubDue: r.pubDue, urgent: r.urgent, thread: t, ok: r.ok,
+          id: t.id, name: t.name, url: t.url, status: r.status, assigneeId: r.assigneeId, due: r.due, pubDue: r.pubDue, urgent: r.urgent, social: r.social, thread: t, ok: r.ok,
         };
       }));
       for (const t of batch) { if (!t.ok) partial = true; tasks.push(t); }
@@ -326,7 +327,7 @@ function createBot({ client, config, store, now = () => new Date(), log = consol
   const UPDATE_IDS = new Set(['kb:prev', 'kb:next', 'kb:status', 'kb:take', 'kb:release', 'kb:assign', 'kb:duemodal']);
   const isUpdate = (i) => {
     const id = i.customId; // komendy nie mają customId
-    return typeof id === 'string' && (UPDATE_IDS.has(id) || id.startsWith('kb:go:') || id.startsWith('kb:urgent:') || id.startsWith('kb:fin:'));
+    return typeof id === 'string' && (UPDATE_IDS.has(id) || id.startsWith('kb:go:') || id.startsWith('kb:urgent:') || id.startsWith('kb:social:') || id.startsWith('kb:fin:'));
   };
 
   async function editCardMessage(thread, messageId, payload) {
@@ -515,6 +516,22 @@ function createBot({ client, config, store, now = () => new Date(), log = consol
     });
   }
 
+  // Premia za social: przyciski karty niosą docelową akcję (kb:social:on, ok, off), a reguły dostępu są w module rozliczeń.
+  async function doSocial(interaction, ctx, action) {
+    const cur = await resolveTask(ctx.thread, ctx.st, today());
+    const res = settlements.setSocial({ userId: interaction.user.id, threadId: ctx.thread.id, assigneeId: cur.assigneeId, action });
+    if (!res.changed) return { changed: false, task: cur };
+    return { changed: true, task: await applyChange(interaction, ctx, { reason: `Kanban: ${interaction.user.tag} zmienia premię za social` }) };
+  }
+
+  async function setSocialButton(interaction) {
+    const action = interaction.customId.slice('kb:social:'.length);
+    await onTask(interaction, async (ctx) => {
+      const res = await doSocial(interaction, ctx, action);
+      if (!res.changed) await showCard(interaction, ctx.thread, res.task);
+    });
+  }
+
   // ------------------------------------------------------------ okna (modale)
   // Nowy format okien (z listą osób) może zostać odrzucony przez Discorda (kod 50035, zły kształt formularza):
   // wtedy przechodzimy na stary, tylko z polami tekstowymi. Inne błędy (np. 40060, interakcja już obsłużona) tego nie wywołują.
@@ -639,7 +656,7 @@ function createBot({ client, config, store, now = () => new Date(), log = consol
     patchMeta(thread.id, { a: personId, d: due, p: pubDue, u: false });
     metaCache.delete(thread.id);
     try {
-      const msg = await thread.send(cardPayload({ status, assigneeId: personId, due, pubDue, urgent: false }));
+      const msg = await thread.send(cardPayload({ status, assigneeId: personId, due, pubDue, urgent: false, social: settlements.enabled ? 'none' : null }));
       patchMeta(thread.id, { c: msg.id });
     } catch (err) {
       log.error(`Karta w poście ${thread.id}: ${err.message}`);
@@ -938,6 +955,7 @@ function createBot({ client, config, store, now = () => new Date(), log = consol
   const updatingHandler = (id) => {
     if (id.startsWith('kb:go:')) return changeStatus;
     if (id.startsWith('kb:urgent:')) return setUrgent;
+    if (id.startsWith('kb:social:')) return setSocialButton;
     return UPDATING[id];
   };
 
@@ -1050,6 +1068,7 @@ function createBot({ client, config, store, now = () => new Date(), log = consol
 
   const webTask = (thread, r) => ({
     id: thread.id, name: thread.name, url: thread.url, status: r.status, assigneeId: r.assigneeId, due: r.due, pubDue: r.pubDue || null, urgent: Boolean(r.urgent),
+    social: r.social || null, // stan premii za social (null = rozliczenia wyłączone), nigdy kwota
   });
 
   // Wspólny początek zmian z poziomu strony: blokada posta, świeży stan z Discorda, te same reguły co przy przyciskach karty.
@@ -1071,7 +1090,7 @@ function createBot({ client, config, store, now = () => new Date(), log = consol
         col.sort(status === 'Opublikowane' ? B.newestFirst : B.compareTasks);
         if (status === 'Opublikowane') publishedTotal = col.length;
         for (const t of (status === 'Opublikowane' ? col.slice(0, PUBLISHED_ON_PAGE) : col)) {
-          out.push({ id: t.id, name: t.name, url: t.url, status: t.status, assigneeId: t.assigneeId, due: t.due, pubDue: t.pubDue || null, urgent: Boolean(t.urgent) });
+          out.push({ id: t.id, name: t.name, url: t.url, status: t.status, assigneeId: t.assigneeId, due: t.due, pubDue: t.pubDue || null, urgent: Boolean(t.urgent), social: t.social || null });
         }
       }
       return { rev, today: day, note, publishedTotal, tasks: out };
@@ -1123,7 +1142,7 @@ function createBot({ client, config, store, now = () => new Date(), log = consol
     revision: () => boardRev,
     async me(actor) {
       const forum = await getForum();
-      return { id: actor.user.id, name: actor.member.displayName, canManage: mayManage(actor, forum) };
+      return { id: actor.user.id, name: actor.member.displayName, canManage: mayManage(actor, forum), finance: settlements.isFinance(actor.user.id) };
     },
     board: () => boardSnapshot(),
     people: async (actor) => listPeople(actor, await boardSnapshot()),
@@ -1146,6 +1165,7 @@ function createBot({ client, config, store, now = () => new Date(), log = consol
       return { changed: true, task: await applyChange(px, ctx, { patch, reason: `Kanban: ${px.user.tag} zmienia terminy` }) };
     }),
     urgent: (actor, id, want) => webTaskOp(actor, id, (ctx, px) => doUrgent(px, ctx, Boolean(want))),
+    social: (actor, id, action) => webTaskOp(actor, id, (ctx, px) => doSocial(px, ctx, action)),
     async create(actor, { title, userId, due, pubDue, description }) {
       const { thread } = await createTask(actor, {
         title, personId: userId || null, dueRaw: String(due ?? '').trim(), pubRaw: String(pubDue ?? '').trim(), description: String(description ?? '').trim().slice(0, 1500),

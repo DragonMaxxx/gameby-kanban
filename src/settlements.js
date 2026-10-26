@@ -21,6 +21,8 @@ const MAX_CONTENT = 1900;
 const RETRY_MS = 30 * 60 * 1000;
 const MAX_ATTEMPTS = 6;
 const REMOVE_WORDS = /^(brak|usun|usuń|-|0|0[.,]0{1,2})$/i;
+const SOCIAL_NOTE = 'udostępnienie w social mediach'; // opis premii za social w protokole
+const SOCIAL_SET_MSG = 'Najpierw ustaw kwotę premii za social: /rozliczenia social kwota:20 (kwotę widzi tylko zarząd).';
 
 const plural = (n, one, few, many) => {
   const a = n % 100;
@@ -43,7 +45,7 @@ function createSettlements({
   const attempts = new Map(); // klucz protokołu -> {n, at}: tylko w pamięci, po restarcie liczymy od nowa
 
   // ------------------------------------------------------------ stan: top-level `fin`
-  // { start: 'RRRR-MM', rates: {userId: {name, rate}}, months: {klucz: rekord} }, klucz = miesiąc albo „miesiąc#2” dla uzupełnienia.
+  // { start: 'RRRR-MM', rates: {userId: {name, rate}}, social: grosze (stała premia za social), months: {klucz: rekord} }, klucz = miesiąc albo „miesiąc#2” dla uzupełnienia.
   // rekord: {month, round, state: draft|sent|skipped, preparedAt, report, sig, note, drafts: [{userId, channelId, messageId}],
   //          sentAt, sentBy, delivery: {userId: {ok, at, code?}}}
   const getFin = () => store.get('fin') || {};
@@ -90,6 +92,72 @@ function createSettlements({
     else if (m.h) patchMeta(threadId, { h: null });
   }
 
+
+  // ------------------------------------------------------------ premia za social (tik na karcie i na stronie)
+  // Stała kwota (fin.social) ustawiana raz przez zarząd. Stan zadania wynika z danych: x = osoba zgłosiła, czeka na zarząd;
+  // premia z k: 'social' na liście b = zatwierdzona (kwotę zapisujemy w chwili zatwierdzenia, późniejsza zmiana stałej jej nie rusza);
+  // z s = już rozliczona w zatwierdzonym protokole. Karta i strona widzą tylko stan (nigdy kwotę).
+  const socialAmount = () => getFin().social || 0;
+  const isSocial = (b) => b && b.k === 'social';
+  const hasSocialBonus = (m) => Array.isArray(m && m.b) && m.b.some(isSocial);
+
+  // null = rozliczenia wyłączone (karta i strona nie pokazują nic), potem: none, claimed, ok, settled.
+  function socialState(threadId) {
+    if (!enabled) return null;
+    const m = metaOf(threadId) || {};
+    const list = (Array.isArray(m.b) ? m.b : []).filter(isSocial);
+    if (list.length) return list.some((b) => b.s) ? 'settled' : 'ok';
+    return m.x ? 'claimed' : 'none';
+  }
+
+  // Miesiąc, do którego trafi premia dodana dziś do tego tekstu (zasada jak przy komendzie premia).
+  const bonusMonthOf = (m) => F.bonusMonthFor({ handedIn: m.h || null, start: getFin().start || null, closed: closedMonths(), currentMonth: F.monthOf(today()) });
+
+  function addSocialBonus(threadId, month, amount) {
+    const m = metaOf(threadId) || {};
+    const list = (Array.isArray(m.b) ? m.b : []).concat([{ i: newBonusId(), a: amount, n: SOCIAL_NOTE, m: month, k: 'social' }]);
+    patchMeta(threadId, { b: list, x: false });
+  }
+
+  // Przyciski `on` (zgłoś albo, dla zarządu, zatwierdź od razu), `ok` (zatwierdź, tylko zarząd) i `off` (cofnij zgłoszenie albo usuń premię).
+  // Zwraca {changed, state}; reguły dostępu tu, żeby karta i strona zachowywały się tak samo.
+  function setSocial({ userId, threadId, assigneeId, action }) {
+    assertEnabled();
+    if (!['on', 'ok', 'off'].includes(action)) throw new UserError('Nie znam tej akcji.');
+    const state = socialState(threadId);
+    const fin = isFinance(userId);
+    const owner = Boolean(assigneeId) && String(userId) === String(assigneeId);
+    if (state === 'settled') {
+      if (action === 'off') throw new UserError('Ta premia jest już rozliczona w zatwierdzonym protokole i nie można jej cofnąć.');
+      return { changed: false, state };
+    }
+    if (action === 'off') {
+      if (state === 'none') return { changed: false, state };
+      if (state === 'claimed') {
+        if (!fin && !owner) throw new UserError('Zgłoszenie premii za social cofa osoba przypisana do zadania albo zarząd.', undefined, 403);
+        patchMeta(threadId, { x: false });
+        return { changed: true, state: 'none' };
+      }
+      if (!fin) throw new UserError('Zatwierdzoną premię za social usuwa tylko zarząd.', undefined, 403);
+      const m = metaOf(threadId) || {};
+      patchMeta(threadId, { b: (m.b || []).filter((b) => !isSocial(b) || b.s) });
+      return { changed: true, state: 'none' };
+    }
+    if (state === 'ok') return { changed: false, state };
+    if (action === 'ok' && !fin) throw new UserError('Premię za social zatwierdza tylko zarząd.', undefined, 403);
+    if (!assigneeId) throw new UserError('Najpierw przydziel osobę do tego zadania.');
+    if (!fin) {
+      if (!owner) throw new UserError('Premię za social zgłasza osoba przypisana do zadania (albo zarząd).', undefined, 403);
+      if (state === 'claimed') return { changed: false, state };
+      patchMeta(threadId, { x: true });
+      return { changed: true, state: 'claimed' };
+    }
+    const amount = socialAmount();
+    if (!amount) throw new UserError(SOCIAL_SET_MSG);
+    addSocialBonus(threadId, bonusMonthOf(metaOf(threadId) || {}), amount);
+    return { changed: true, state: 'ok' };
+  }
+
   // ------------------------------------------------------------ zestawienie z aktualnych zadań
   async function gatherTasks() {
     const { tasks, partial, note } = await collectBoard();
@@ -107,6 +175,8 @@ function createSettlements({
         archived: Boolean(t.thread && t.thread.archived),
         created: ts ? B.todayIn(config.timeZone, new Date(ts)) : null,
         bonuses: Array.isArray(m.b) ? m.b : [],
+        claimed: Boolean(m.x),
+        socialDone: hasSocialBonus(m),
       };
     });
     return { tasks: out, note: partial ? (note || 'Nie udało się pobrać części zadań.') : '' };
@@ -118,7 +188,7 @@ function createSettlements({
     return { report, sig: F.reportSignature(report), note };
   }
 
-  const hasLeftovers = (r) => r.noRate.length > 0 || r.unassigned.length > 0 || r.undated.length > 0;
+  const hasLeftovers = (r) => r.noRate.length > 0 || r.unassigned.length > 0 || r.undated.length > 0 || (r.claims || []).length > 0;
 
   // ------------------------------------------------------------ treść i przyciski szkicu
   // Lista z ograniczeniem długości: pierwsze `max` pozycji i „i N więcej”.
@@ -146,6 +216,10 @@ function createSettlements({
     }
     if (r.undated.length) {
       notes.push(`Bez daty oddania (tekst z czasów przed rozliczeniami): ${r.undated.length}. Zaznacz w menu niżej te, które oddano w tym miesiącu.`);
+    }
+    const claims = r.claims || [];
+    if (claims.length) {
+      notes.push(`Zgłoszone premie za social do zatwierdzenia: ${claims.length}. Zaznacz w menu niżej te, które zatwierdzasz (trafią do tego miesiąca); reszta zostaje na następny szkic.`);
     }
     if (rec.note) notes.push(`${rec.note} Zestawienie może być niepełne, odśwież szkic.`);
     const tail = [
@@ -190,6 +264,22 @@ function createSettlements({
           }))),
       ));
     }
+    const claims = (r.claims || []).slice(0, MAX_UNDATED_OPTIONS);
+    if (claims.length) {
+      const rates = ratesOf();
+      rows.push(new ActionRowBuilder().addComponents(
+        new StringSelectMenuBuilder()
+          .setCustomId(`kb:fin:social:${key}`)
+          .setPlaceholder('Zatwierdź premie za social')
+          .setMinValues(1)
+          .setMaxValues(claims.length)
+          .addOptions(claims.map((c) => ({
+            label: Array.from(c.title).slice(0, 100).join(''),
+            value: c.id,
+            description: clip(rates[c.userId] ? `zgłasza: ${rates[c.userId].name}` : 'zgłoszenie osoby bez stawki', 100),
+          }))),
+      ));
+    }
     return rows;
   }
 
@@ -201,11 +291,13 @@ function createSettlements({
     if (r.noRate.length) left.push(`bez stawki: ${r.noRate.reduce((s, x) => s + x.texts + x.bonuses, 0)}`);
     if (r.unassigned.length) left.push(`bez osoby: ${r.unassigned.length}`);
     if (r.undated.length) left.push(`bez daty oddania: ${r.undated.length}`);
+    const claims = (r.claims || []).length;
     const lines = [
       `**Wysłać protokoły za ${r.label} do ${r.persons.length} ${plural(r.persons.length, 'osoby', 'osób', 'osób')}?** Razem ${F.formatMoney(r.grandTotal)}.`,
       'Tej operacji nie da się cofnąć: dane zostaną zamrożone, a osoby dostaną PDF w wiadomości prywatnej.',
     ];
     if (left.length) lines.push(`Poza protokołami zostają teksty i premie: ${left.join(', ')}. Rozliczysz je później protokołem uzupełniającym (/rozliczenia szkic).`);
+    if (claims) lines.push(`Niezatwierdzone zgłoszenia premii za social (${claims}) nie wejdą do protokołów; zostają na następny szkic.`);
     return {
       content: clip(lines.join('\n')),
       components: [new ActionRowBuilder().addComponents(
@@ -433,12 +525,29 @@ function createSettlements({
 
   async function cmdStawki(interaction) {
     const entries = Object.entries(ratesOf()).sort((a, b) => a[1].name.localeCompare(b[1].name, 'pl'));
+    const social = socialAmount() ? `Premia za social: ${F.formatMoney(socialAmount())} (stała).` : 'Premia za social: nie ustawiono (/rozliczenia social).';
     if (!entries.length) {
-      await interaction.editReply({ content: 'Nikt nie ma jeszcze stawki. Ustaw ją komendą /rozliczenia stawka.' });
+      await interaction.editReply({ content: `Nikt nie ma jeszcze stawki. Ustaw ją komendą /rozliczenia stawka.\n${social}` });
       return;
     }
     const lines = entries.map(([id, r]) => `• ${B.esc(r.name)} (<@${id}>): ${F.formatMoney(r.rate)} za tekst`);
-    await interaction.editReply({ content: clip(`**Stawki za tekst** (widzi je tylko zarząd):\n${lines.join('\n')}`), allowedMentions: NO_MENTIONS });
+    await interaction.editReply({ content: clip(`**Stawki za tekst** (widzi je tylko zarząd):\n${lines.join('\n')}\n${social}`), allowedMentions: NO_MENTIONS });
+  }
+
+  async function cmdSocial(interaction) {
+    const raw = interaction.options.getString('kwota', true).trim();
+    if (REMOVE_WORDS.test(raw)) {
+      if (!socialAmount()) throw new UserError('Premia za social nie ma ustawionej kwoty.');
+      setFin({ social: 0 });
+      await interaction.editReply({ content: 'Usunięto kwotę premii za social: zatwierdzanie premii (tik) przestaje działać, dopóki nie ustawisz nowej. Już zatwierdzone premie zostają z dawną kwotą.' });
+      return;
+    }
+    const amount = F.parseMoney(raw);
+    if (!amount) throw new UserError('Nie rozumiem kwoty. Wpisz np. 20 albo 20,50 (albo „brak”, żeby ją usunąć).');
+    setFin({ social: amount });
+    await interaction.editReply({
+      content: `Premia za social: ${F.formatMoney(amount)} (jedna stała kwota dla wszystkich). Dotyczy premii zatwierdzanych od teraz, już zatwierdzone zostają z dawną kwotą. Kwotę widzi tylko zarząd.`,
+    });
   }
 
   async function cmdPremia(interaction) {
@@ -459,7 +568,7 @@ function createSettlements({
         return;
       }
       const cur = await resolveTask(thread, st, today());
-      const month = F.bonusMonthFor({ handedIn: m.h || null, start: getFin().start || null, closed: closedMonths(), currentMonth: F.monthOf(today()) });
+      const month = bonusMonthOf(m);
       list.push({ i: newBonusId(), a: amount, n: note, m: month });
       patchMeta(thread.id, { b: list });
       const parts = [`Dodano premię ${F.formatMoney(amount)}${note ? ` (${B.esc(note)})` : ''}. Trafi do rozliczenia za ${F.monthLabel(month)}.`];
@@ -496,6 +605,7 @@ function createSettlements({
     if (sub === 'stawka') return cmdStawka(interaction);
     if (sub === 'stawki') return cmdStawki(interaction);
     if (sub === 'premia') return cmdPremia(interaction);
+    if (sub === 'social') return cmdSocial(interaction);
     if (sub === 'szkic') return cmdSzkic(interaction);
     throw new UserError('Nie znam tej komendy. Odśwież Discorda (Ctrl+R) i spróbuj ponownie.');
   }
@@ -550,6 +660,17 @@ function createSettlements({
         await refreshFor(interaction, key, rec);
         return;
       }
+      if (action === 'social') {
+        const amount = socialAmount();
+        if (!amount) throw new UserError(SOCIAL_SET_MSG);
+        const valid = new Set((rec.report.claims || []).map((c) => c.id));
+        for (const id of interaction.values || []) {
+          const m = metaOf(id) || {};
+          if (valid.has(id) && m.x && !hasSocialBonus(m)) addSocialBonus(id, rec.month, amount);
+        }
+        await refreshFor(interaction, key, rec);
+        return;
+      }
       if (action === 'yes') { await approve(interaction, key, rec); return; }
       throw new UserError('Nie znam tego przycisku. Zamknij tę rozmowę i poproś o nowy szkic: /rozliczenia szkic.');
     });
@@ -581,7 +702,7 @@ function createSettlements({
   }
 
   return {
-    enabled, isFinance, command, onComponent, financeTick, noteStatusChange,
+    enabled, isFinance, command, onComponent, financeTick, noteStatusChange, socialState, setSocial,
   };
 }
 

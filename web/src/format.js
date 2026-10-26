@@ -64,3 +64,10 @@ export function hueOf(id) {
 export function safeDiscordUrl(url) {
   return typeof url === 'string' && /^https:\/\/(?:[a-z]+\.)?discord(?:app)?\.com\/channels\/\d+\/\d+(?:\/\d+)?$/.test(url) ? url : null;
 }
+
+// Premia za social: stan widać dla wszystkich (plakietka, opis w oknie zadania), kwoty nigdy. Kwoty i zatwierdzanie obsługuje bot.
+export const SOCIAL = {
+  claimed: { text: 'social: zgłoszone', tone: 'soon', label: 'Premia za social zgłoszona, czeka na zatwierdzenie', status: 'zgłoszone, czeka na zatwierdzenie przez zarząd' },
+  ok: { text: 'social ✓', tone: 'done', label: 'Premia za social zatwierdzona', status: 'zatwierdzone' },
+  settled: { text: 'social ✓', tone: 'done', label: 'Premia za social rozliczona', status: 'rozliczone w protokole' },
+};

@@ -1,7 +1,7 @@
 // Autor: Mateusz Bartoszewicz
 // Okno zadania (status, osoba, termin, pilne) i okno nowego zadania. Każda akcja idzie do bota, który sprawdza uprawnienia jeszcze raz.
 import { h, clear, append, icon, toast } from './dom.js';
-import { safeDiscordUrl } from './format.js';
+import { safeDiscordUrl, SOCIAL } from './format.js';
 import { avatarEl, personName } from './people.js';
 
 const FOCUSABLE = 'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
@@ -122,6 +122,16 @@ export function createDialogs({ store, actions, openLink }) {
     const urgent = h('input', { type: 'checkbox', id: 'urgent-input' });
     urgent.addEventListener('change', () => run(() => actions.urgent(store.task(taskId), urgent.checked)));
 
+    // Premia za social: zgłasza osoba z zadania (albo zarząd, wtedy od razu zatwierdza), zatwierdza zarząd. Kwoty strona nie zna.
+    const socialBox = h('input', { type: 'checkbox', id: 'social-input' });
+    socialBox.addEventListener('change', () => run(() => actions.social(store.task(taskId), socialBox.checked ? 'on' : 'off')));
+    const socialStatus = h('p', { class: 'hint', id: 'social-status' });
+    const socialOk = h('button', { type: 'button', class: 'btn', id: 'social-ok', text: 'Zatwierdź premię', onClick: () => run(() => actions.social(store.task(taskId), 'ok')) });
+    const socialField = h('div', { class: 'field', id: 'social-field', hidden: true },
+      h('span', { class: 'label', text: 'Premia za social' }),
+      h('label', { class: 'switch', for: 'social-input' }, socialBox, 'Tekst udostępniono na social mediach'),
+      socialStatus, socialOk);
+
     const content = [
       h('div', { class: 'sheet-head' }, title, closeBtn),
       h('div', { class: 'row' }, link),
@@ -132,6 +142,7 @@ export function createDialogs({ store, actions, openLink }) {
       h('div', { class: 'field' }, h('label', { for: 'pub-input', text: 'Termin publikacji' }), h('div', { class: 'row' }, pubInput, pubSave, pubClear),
         h('p', { class: 'hint', text: 'Np. premiera lub embargo. Po oddaniu tekstu liczy się już tylko ten termin.' })),
       h('div', { class: 'field' }, h('span', { class: 'label', text: 'Priorytet' }), h('label', { class: 'switch', for: 'urgent-input' }, urgent, 'Pilne')),
+      socialField,
     ];
     const m = modal({ labelId: 'sheet-title', content, onClose: closeAll });
 
@@ -192,6 +203,15 @@ export function createDialogs({ store, actions, openLink }) {
       pubClear.hidden = !t.pubDue;
       // W trakcie zapisu zostawiamy to, co wybrała osoba; po odpowiedzi bota (albo błędzie) wraca stan z serwera.
       if (!busy) urgent.checked = t.urgent;
+      const soc = t.social || null; // null: rozliczenia wyłączone, pola nie ma
+      socialField.hidden = !soc;
+      if (soc) {
+        const finance = Boolean(state.me && state.me.finance);
+        if (!busy) socialBox.checked = soc !== 'none';
+        socialBox.disabled = soc === 'settled' || (soc === 'ok' ? !finance : !(mine || finance));
+        socialStatus.textContent = soc === 'none' ? 'Zaznacz, gdy tekst udostępniono na swoich social mediach. Zgłoszenie zatwierdza zarząd.' : `Premia za social: ${SOCIAL[soc].status}.`;
+        socialOk.hidden = !(soc === 'claimed' && finance);
+      }
       m.sheet.setAttribute('aria-busy', String(busy));
     }
 

@@ -82,7 +82,7 @@ Zadania na dalszych etapach zostają tam, gdzie są.
 - `/tablica [moje] [publicznie]`: tablica jednorazowo, w jednej wiadomości (prywatnie albo na bieżący kanał redakcji). Przydaje się na telefonie, gdy nie chcesz wchodzić na kanał z tablicą.
 - `/panel`: dodaje świeżą kartę do posta (zastępuje poprzednią). Przydaje się w starych postach z panelem z poprzedniej wersji bota.
 - `/podsumowanie`: to samo, co bot wysyła rano.
-- `/rozliczenia stawka | stawki | premia | szkic`: tylko zarząd (`FINANCE_USER_IDS`), odpowiedzi są prywatne. Opis w rozdziale „Rozliczenia” niżej.
+- `/rozliczenia stawka | stawki | premia | social | szkic`: tylko zarząd (`FINANCE_USER_IDS`), odpowiedzi są prywatne. Opis w rozdziale „Rozliczenia” niżej.
 
 ## Rozliczenia z osobami piszącymi (tylko zarząd)
 
@@ -102,6 +102,11 @@ Opcjonalnie `PROTOCOL_ISSUER` (nazwa zleceniodawcy na protokole, domyślnie `Gam
    (domyślnie nazwa z serwera); przy zmianie samej kwoty imię zostaje. `/rozliczenia stawki` pokazuje wszystkie stawki (tylko Tobie), a `kwota:brak` usuwa stawkę.
 2. **Premie:** w poście z zadaniem `/rozliczenia premia kwota:20 opis:post na Facebooku`. Można dodać po publikacji i kilka do jednego tekstu. Premia trafia do miesiąca, w którym tekst oddano, jeśli jego protokół nie jest jeszcze zatwierdzony,
    a w przeciwnym razie do bieżącego miesiąca. `kwota:brak` usuwa nierozliczone premie tego tekstu.
+   **Premia za social bez komendy:** zarząd ustawia raz jedną stałą kwotę dla wszystkich (`/rozliczenia social kwota:20`, `kwota:brak` ją usuwa). Potem na karcie w poście jest przycisk **Premia za social**, a w oknie zadania na stronie pole
+   „Tekst udostępniono na social mediach”. Osobę z zadania wystarczy poprosić o kliknięcie: to **zgłasza** premię (na karcie i na tablicy pojawia się „social: zgłoszone”). Zgłoszenia zatwierdzasz na szkicu w menu
+   „Zatwierdź premie za social” (trafiają do rozliczanego miesiąca) albo od razu z karty lub strony przyciskiem **Zatwierdź social**; gdy sam klikniesz przycisk na karcie, premia jest zatwierdzona od razu. Zatwierdzona premia dostaje kwotę
+   z chwili zatwierdzenia (późniejsza zmiana stałej jej nie rusza) i wpisuje się do protokołu jako „udostępnienie w social mediach”. Zgłoszenie cofa osoba z zadania albo zarząd, zatwierdzoną premię usuwa tylko zarząd, a po zatwierdzeniu protokołu jest zamrożona.
+   Na zadanie przypada jedna taka premia. Bez ustawionej kwoty zgłaszać można, ale zatwierdzić się nie da.
 3. **Szkic:** bot wysyła Ci najpierw podgląd PDF-ów (po 10 w wiadomości), a na końcu podsumowanie: kto, ile tekstów i premii, kwota, oraz ostrzeżenia. Ręcznie: `/rozliczenia szkic` (poprzedni miesiąc) albo `/rozliczenia szkic miesiac:2026-10`.
    Ostrzeżenia: **bez stawki** (osoba nie dostanie protokołu, ustaw stawkę), **bez osoby** (przydziel osobę na karcie) i **bez daty oddania** (menu do zaznaczenia, patrz niżej). Po poprawkach użyj **Odśwież szkic**.
 4. **Zatwierdzenie:** **Wyślij do osób**, potem potwierdzenie („Tak, wyślij”). Przed wysyłką bot sprawdza jeszcze raz, czy nic się nie zmieniło od szkicu (nowy tekst, premia, stawka, zmiana statusu): jeśli tak,
@@ -113,6 +118,7 @@ Opcjonalnie `PROTOCOL_ISSUER` (nazwa zleceniodawcy na protokole, domyślnie `Gam
 zaznaczasz te, które faktycznie oddano w rozliczanym miesiącu, a szkic odświeża się sam.
 
 **Kto co widzi.** Stawki, kwoty, premie i szkice widzi tylko zarząd: odpowiedzi komend są prywatne, szkic idzie do wiadomości prywatnych, a kwoty nie trafiają na kartę zadania, tablicę, stronę z tablicą, podsumowanie dnia ani do logów.
+Wyjątek to sam stan premii za social (brak, zgłoszona, zatwierdzona): widać go na karcie, na kartach i w oknie zadania na stronie, ale nigdy z kwotą. Żywy nagłówek tablicy w Discordzie go nie pokazuje.
 Osoba widzi wyłącznie swój protokół, dopiero po zatwierdzeniu. Uwaga: stawki i kwoty leżą w pliku stanu (`state.json`), więc widzi je każdy, kto ma dostęp do wolumenu bota lub projektu na Railway.
 
 **Co jest w PDF.** Tytuł i miesiąc, zleceniodawca, imię i nazwisko osoby, tabela tekstów (tytuł, data oddania, stawka, kwota), premie, suma „Razem do wypłaty”, pole na liczbę przepracowanych godzin, pole na uwagi i miejsca na dwa podpisy.
@@ -144,7 +150,7 @@ docker compose cp kanban:/data/state.json ./state-kopia.json
 ```
 
 **Rozliczenia** są w tym samym pliku: top-level `fin` (stawki, imiona do protokołów, historia protokołów z zamrożonymi zestawieniami i wynikiem wysyłki), a w danych zadania klucze `h` (data oddania do redakcji),
-`s` (miesiąc rozliczenia tekstu) i `b` (lista premii). Kopia pliku zawiera więc stawki i kwoty; traktuj ją jak dane poufne.
+`s` (miesiąc rozliczenia tekstu), `b` (lista premii; premie za social mają `k: "social"`) i `x` (zgłoszona premia za social); w `fin` jest też `social`, czyli stała kwota tej premii. Kopia pliku zawiera więc stawki i kwoty; traktuj ją jak dane poufne.
 
 Posty założone ręcznie albo przez poprzednią wersję bota: dopóki nikt nie ustawi osoby lub terminu kartą, bot czyta je jak dawniej z pierwszej wiadomości posta
 (linie `Odpowiedzialny: @osoba` i `Termin: 05.11.2026`, wymaga Message Content Intent, patrz niżej), a bez tych linii osobą jest autor posta.
@@ -336,7 +342,7 @@ Dokumentacja Railway nie podaje limitu długości zmiennej. Jeśli Railway odrzu
 6. Zaloguj się na `https://tablica.gameby.pl` i przesuń testową kartę. Dopiero potem usuń `STATE_SEED_B64`, a na komputerze `docker compose --profile tunnel down` (**bez** `-v`; wolumen z kopią zostaw na wszelki wypadek na kilka tygodni).
 
 **Kolejne wersje na Railway**: wgraj zmienione pliki do repozytorium na GitHubie (cały folder `src`, `web`, `test` itd., nie tylko pojedyncze pliki), a Railway sam zbuduje i wdroży nową wersję. Plik stanu na wolumenie zostaje, a w wersji z dwoma terminami nic nie trzeba w nim przenosić
-(nowy klucz `p` pojawia się tylko tam, gdzie ustawisz termin publikacji; rozliczenia dodają klucze `h`, `s`, `b` i `fin`, także bez migracji; żeby je włączyć, dopisz w Variables `FINANCE_USER_IDS`). Wdrożenie restartuje bota na kilka minut (wolumen potrafi się montować z opóźnieniem), a sesje logowania na stronie są w pamięci, więc po restarcie trzeba zalogować się ponownie.
+(nowy klucz `p` pojawia się tylko tam, gdzie ustawisz termin publikacji; rozliczenia dodają klucze `h`, `s`, `b`, `x` i `fin`, także bez migracji; żeby je włączyć, dopisz w Variables `FINANCE_USER_IDS`). Wdrożenie restartuje bota na kilka minut (wolumen potrafi się montować z opóźnieniem), a sesje logowania na stronie są w pamięci, więc po restarcie trzeba zalogować się ponownie.
 Karty w postach przepisują się dopiero przy następnej zmianie w danym poście (albo po `/panel`), więc do tego czasu starsze karty pokazują jeszcze pole „Termin” zamiast dwóch pól; przycisk „Termin” na takiej karcie działa i otwiera już okno „Terminy”.
 
 **Czego ta instrukcja nie obejmuje:** nie testowałem wdrożenia na prawdziwym Railway, a kolejność powyżej i nagłówki bramy opisuję według dokumentacji i odpowiedzi pracowników Railway, które nie są stałą gwarancją. Po pierwszym wdrożeniu sprawdź sam logowanie i to,
@@ -390,6 +396,7 @@ Jeśli na serwerze są dwa kanały o tej samej nazwie, bot wybiera ten niewidocz
 - Osoba, termin i priorytet są w pliku stanu bota (patrz wyżej), a nie w Discordzie.
 - **Rozliczenia nie są księgowością.** Bot zlicza teksty razy stawka plus premie i wysyła zestawienie do podpisu. Nie wystawia faktur ani rachunków, nie liczy podatków, składek ani brutto/netto, nie śledzi, kto odesłał podpisany protokół,
   i nie zna korekt ujemnych: błąd po wysyłce poprawiasz poza botem albo w kolejnym miesiącu. Teksty liczą się do osoby przypisanej w chwili szkicu, a stawka to ta z chwili szkicu (zmiana stawki w trakcie miesiąca dotyczy wszystkich tekstów z tego miesiąca).
+  Starsze karty w postach nie mają przycisku premii za social do czasu najbliższej zmiany w poście albo `/panel`; po zatwierdzeniu protokołu karta pokazuje „zatwierdzona” do następnej zmiany (rozliczenie jej nie odświeża).
   Pierwszy dzień roboczy to poniedziałek-piątek; święta bot pomija (szkic i tak czeka na Twoje zatwierdzenie). Treść PDF to roboczy szablon do sprawdzenia z księgową.
 - Gdy osoba przypisana do zadania opuści serwer, zadanie zostaje przypisane do niej (na tablicy zobaczysz nieczytelne oznaczenie). Zwolnij je `/edytuj zwolnij:True` albo przydziel komuś innemu; bot nie śledzi odejść z serwera.
 - Termin bez roku (`05.11`) bot rozumie jako najbliższą taką datę w przyszłości. Jeśli wpiszesz datę z przeszłości bez roku, dostaniesz następny rok; bot zawsze pokazuje w odpowiedzi, jaki termin zapisał.

@@ -2,7 +2,7 @@
 // Kolumny i karty. Kolumny są trwałymi elementami; karty przebudowujemy tylko w kolumnach, w których coś się zmieniło,
 // dzięki temu przewijanie i fokus nie skaczą przy odświeżaniu co kilka sekund.
 import { h, clear, icon } from './dom.js';
-import { dueChips } from './format.js';
+import { dueChips, SOCIAL } from './format.js';
 import { avatarEl, personName } from './people.js';
 
 export function createBoard({ store, onOpen }) {
@@ -49,8 +49,9 @@ export function createBoard({ store, onOpen }) {
     const who = task.assigneeId
       ? h('span', { class: 'who' }, avatarEl(person, task.assigneeId), h('span', { text: personName(state, task.assigneeId) }))
       : h('span', { class: 'who', text: 'Bez osoby' });
+    const social = SOCIAL[task.social] || null; // plakietka bez kwoty (null: brak premii albo rozliczenia wyłączone)
     const label = [task.name, `Status: ${task.status}`, task.assigneeId ? `Osoba: ${personName(state, task.assigneeId)}` : 'Bez osoby',
-      ...chips.map((c) => c.label), task.urgent ? 'Pilne' : null].filter(Boolean).join('. ');
+      ...chips.map((c) => c.label), task.urgent ? 'Pilne' : null, social ? social.label : null].filter(Boolean).join('. ');
     return h('li', {
       class: `card${task.urgent ? ' urgent' : ''}${mine ? ' mine' : ''}`, dataset: { id: task.id }, tabindex: '0', role: 'button', 'aria-label': label,
       onKeydown: (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onOpen(task.id); } },
@@ -61,7 +62,8 @@ export function createBoard({ store, onOpen }) {
       h('div', { class: 'card-meta' },
         who,
         ...chips.map((c) => h('span', { class: `chip ${c.tone}`, text: c.text })),
-        task.urgent ? h('span', { class: 'chip urgent', text: 'PILNE' }) : null)));
+        task.urgent ? h('span', { class: 'chip urgent', text: 'PILNE' }) : null,
+        social ? h('span', { class: `chip ${social.tone}`, text: social.text, title: social.label }) : null)));
   }
 
   function render() {
@@ -76,7 +78,7 @@ export function createBoard({ store, onOpen }) {
       const all = state.tasks.filter((t) => t.status === status);
       const shown = all.filter((t) => store.visible(t));
       const sig = JSON.stringify([
-        shown.map((t) => [t.id, t.name, t.assigneeId, t.due, t.pubDue, t.urgent, t.assigneeId ? [personName(state, t.assigneeId), Boolean((state.people.get(t.assigneeId) || {}).avatar)] : 0]),
+        shown.map((t) => [t.id, t.name, t.assigneeId, t.due, t.pubDue, t.urgent, t.social, t.assigneeId ? [personName(state, t.assigneeId), Boolean((state.people.get(t.assigneeId) || {}).avatar)] : 0]),
         state.me && state.me.id, state.today, state.filter, status === 'Opublikowane' ? state.publishedTotal : 0,
       ]);
       col.count.textContent = String(shown.length);

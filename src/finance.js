@@ -82,15 +82,17 @@ function bonusMonthFor({ handedIn, start, closed = {}, currentMonth }) {
 }
 
 // ---------------------------------------------------------------- zestawienie
-// tasks: {id, name, url, status, assigneeId, handedIn, settled, archived, created, bonuses: [{i, a, n, m, s}]}
+// tasks: {id, name, url, status, assigneeId, handedIn, settled, archived, created, bonuses: [{i, a, n, m, s}], claimed, socialDone}
 //   handedIn: data oddania do redakcji (YYYY-MM-DD), settled: miesiąc rozliczenia tekstu, created: data założenia posta,
-//   bonuses: premie (i = numer premii, a = kwota w groszach, n = za co, m = miesiąc rozliczenia, s = miesiąc, w którym już rozliczono)
+//   bonuses: premie (i = numer premii, a = kwota w groszach, n = za co, m = miesiąc rozliczenia, s = miesiąc, w którym już rozliczono),
+//   claimed: osoba zgłosiła premię za social, a zarząd jeszcze jej nie zatwierdził, socialDone: premia za social jest już przyznana
 // people: {userId: {name, rate}}  (rate w groszach)
 function buildReport({ month, tasks, people = {} }) {
   const byPerson = new Map();
   const noRate = new Map();
   const unassigned = [];
   const undated = [];
+  const claims = []; // zgłoszone premie za social do zatwierdzenia przez zarząd (nie wchodzą do protokołów, dopóki ich nie zatwierdzi)
   const person = (id) => {
     if (!byPerson.has(id)) byPerson.set(id, { userId: id, texts: [], bonuses: [] });
     return byPerson.get(id);
@@ -99,6 +101,7 @@ function buildReport({ month, tasks, people = {} }) {
   const oldestCreated = `${prevMonth(month)}-01`;
 
   for (const t of tasks) {
+    if (t.claimed && !t.socialDone && t.assigneeId) claims.push({ id: t.id, title: t.name, userId: t.assigneeId });
     const handed = isWritingDone(t.status) && !t.settled;
     if (handed && !t.handedIn && t.assigneeId && (!t.created || t.created >= oldestCreated)) {
       undated.push({ id: t.id, title: t.name, archived: Boolean(t.archived), status: t.status, assigneeId: t.assigneeId, created: t.created || null });
@@ -133,6 +136,7 @@ function buildReport({ month, tasks, people = {} }) {
   }
   persons.sort((a, b) => a.name.localeCompare(b.name, 'pl') || a.userId.localeCompare(b.userId));
   undated.sort((a, b) => (b.created || '').localeCompare(a.created || '') || a.title.localeCompare(b.title, 'pl')); // najnowsze na górze, bez daty na końcu
+  claims.sort((a, b) => a.title.localeCompare(b.title, 'pl') || a.id.localeCompare(b.id));
   return {
     month,
     label: monthLabel(month),
@@ -140,6 +144,7 @@ function buildReport({ month, tasks, people = {} }) {
     noRate: [...noRate.values()],
     unassigned,
     undated,
+    claims,
     settle,
     grandTotal: persons.reduce((s, p) => s + p.total, 0),
   };

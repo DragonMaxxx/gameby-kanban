@@ -409,6 +409,10 @@ function createWebServer({
         if (typeof body.urgent !== 'boolean') throw new HttpError(400, 'Nieprawidłowe: priorytet.');
         task = await bot.web.urgent(actor, snowflake(body.id, 'zadanie'), body.urgent);
         break;
+      case '/api/social':
+        if (!['on', 'ok', 'off'].includes(body.action)) throw new HttpError(400, 'Nieprawidłowe: premia za social.');
+        task = await bot.web.social(actor, snowflake(body.id, 'zadanie'), body.action);
+        break;
       case '/api/task': {
         const title = str(body.title, 100, { required: true, name: 'tytuł' }).trim();
         if (!title) throw new HttpError(400, 'Podaj tytuł zadania.');

@@ -222,6 +222,22 @@ test('buildReport: teksty bez daty oddania pokazujemy tylko, gdy post założono
   assert.deepEqual(r.undated.map((x) => x.id), ['1', '2', '4']); // najnowsze założone na górze, bez daty na końcu
 });
 
+test('buildReport: zgłoszone premie za social trafiają na listę do zatwierdzenia, ale nie do protokołów ani odcisku', () => {
+  const tasks = [
+    T('1', 'Zgłoszony A', { claimed: true }),
+    T('2', 'Zgłoszony B, już zatwierdzony', { claimed: true, socialDone: true }),
+    T('3', 'Bez zgłoszenia'),
+    T('4', 'Zgłoszony bez osoby', { claimed: true, assigneeId: null }),
+    T('5', 'Zgłoszony, stary i opublikowany', { claimed: true, status: 'Opublikowane', handedIn: '2026-01-10' }),
+  ];
+  const r = F.buildReport({ month: '2026-10', people: PEOPLE, tasks });
+  assert.deepEqual(r.claims.map((x) => x.id), ['1', '5'], 'tylko zgłoszenia z osobą i bez przyznanej premii, posortowane po tytule');
+  assert.deepEqual(r.claims.map((x) => x.userId), [tasks[0].assigneeId, tasks[4].assigneeId]);
+  const noClaims = F.buildReport({ month: '2026-10', people: PEOPLE, tasks: tasks.map((t) => ({ ...t, claimed: false })) });
+  assert.equal(F.reportSignature(r), F.reportSignature(noClaims), 'zgłoszenia nie zmieniają protokołów, więc nie unieważniają szkicu');
+  assert.deepEqual(noClaims.claims, []);
+});
+
 test('reportSignature: ten sam stan daje ten sam odcisk, każda zmiana w protokołach go zmienia', () => {
   const base = () => [T('1', 'a'), T('2', 'b', { assigneeId: 'u2' })];
   const sig = (tasks, people = PEOPLE) => F.reportSignature(F.buildReport({ month: '2026-10', people, tasks }));

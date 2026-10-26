@@ -37,3 +37,23 @@ test('config: brakujące i błędne wartości dają czytelne błędy', () => {
   assert.throws(() => loadConfig({ ...OK, MESSAGE_CONTENT: 'tak' }), /logiczna/);
   assert.throws(() => loadConfig({ ...OK, TIMEZONE: 'Mars/Olympus' }), /strefa/);
 });
+
+test('config: rozliczenia są domyślnie wyłączone, a ustawienia protokołu mają rozsądne wartości', () => {
+  const c = loadConfig(OK);
+  assert.deepEqual(c.finance.userIds, []);
+  assert.equal(c.finance.issuer, 'GameBy.pl');
+  assert.equal(c.finance.returnEmail, null);
+  assert.equal(c.finance.title, 'Protokół rozliczenia tekstów');
+});
+
+test('config: FINANCE_USER_IDS, PROTOCOL_ISSUER i PROTOCOL_RETURN_EMAIL', () => {
+  const c = loadConfig({
+    ...OK, FINANCE_USER_IDS: ' 123456789012345678 , 223456789012345678,123456789012345678\r', PROTOCOL_ISSUER: 'GameBy.pl sp. z o.o.', PROTOCOL_RETURN_EMAIL: 'rozliczenia@gameby.pl',
+  });
+  assert.deepEqual(c.finance.userIds, ['123456789012345678', '223456789012345678']); // bez duplikatów
+  assert.equal(c.finance.issuer, 'GameBy.pl sp. z o.o.');
+  assert.equal(c.finance.returnEmail, 'rozliczenia@gameby.pl');
+  assert.throws(() => loadConfig({ ...OK, FINANCE_USER_IDS: 'Mateusz' }), /FINANCE_USER_IDS/);
+  assert.throws(() => loadConfig({ ...OK, FINANCE_USER_IDS: '123' }), /FINANCE_USER_IDS/);
+  assert.throws(() => loadConfig({ ...OK, PROTOCOL_RETURN_EMAIL: 'bez-malpy' }), /PROTOCOL_RETURN_EMAIL/);
+});

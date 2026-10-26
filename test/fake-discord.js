@@ -35,6 +35,9 @@ class FakeDiscord {
     this.threads = [];
     this.messages = new Map(); // channelId -> [message]
     this.botRoles = [ID.rBot];
+    this.dmChannels = []; // {id, type: 1, recipients: [user]}: wiadomości prywatne bota
+    this.blockedDms = new Set(); // osoby, które nie przyjmują wiadomości prywatnych (błąd 50007)
+    this.files = new Map(); // id załącznika -> {name, data}
     this.seed();
   }
 
@@ -65,13 +68,16 @@ class FakeDiscord {
   }
 
   // ---------------------------------------------------------------- dane testowe
-  addThread({ name, owner = ID.autor, status = 'Pomysł', topics = [], archived = false, archivedAt = null, content = '', parent = ID.forum, id = null }) {
+  addThread({ name, owner = ID.autor, status = 'Pomysł', topics = [], archived = false, archivedAt = null, content = '', parent = ID.forum, id = null, created = null }) {
     const tid = id || this.newId();
     const applied = [...(status ? [tagId(status)] : []), ...topics.map(tagId)];
     const thread = {
       id: tid, type: 11, guild_id: ID.guild, parent_id: parent, owner_id: owner, name, last_message_id: tid, message_count: 1,
       member_count: 1, rate_limit_per_user: 0, total_message_sent: 1, flags: 0, applied_tags: applied,
-      thread_metadata: { archived, auto_archive_duration: 10080, archive_timestamp: (archivedAt ? new Date(archivedAt) : new Date()).toISOString(), locked: false },
+      thread_metadata: {
+        archived, auto_archive_duration: 10080, archive_timestamp: (archivedAt ? new Date(archivedAt) : new Date()).toISOString(), locked: false,
+        ...(created ? { create_timestamp: new Date(created).toISOString() } : {}),
+      },
     };
     this.threads.push(thread);
     this.messages.set(tid, [this.makeMessage(tid, tid, owner === ID.app ? ID.app : owner, content)]);
@@ -218,12 +224,23 @@ class FakeDiscord {
   }
 
   channelPayload(id) {
-    return this.threads.find((t) => t.id === id) || this.channels.find((c) => c.id === id);
+    return this.threads.find((t) => t.id === id) || this.channels.find((c) => c.id === id) || this.dmChannels.find((c) => c.id === id);
+  }
+
+  // Kanał wiadomości prywatnych bota z daną osobą (tworzony przy pierwszej wiadomości, jak w Discordzie).
+  dmChannelOf(userId) {
+    return this.dmChannels.find((c) => c.recipients[0].id === userId) || null;
+  }
+
+  // Załączniki wiadomości jako bufory: [{name, data}].
+  attachmentsOf(message) {
+    return (message.attachments || []).map((a) => ({ name: a.filename, data: this.files.get(a.id).data }));
   }
 
   command(userId, name, options = [], channelId = ID.ogolne, guildId = ID.guild, extra = {}) {
     const users = {};
-    for (const o of options) if (o.type === 6) users[o.value] = this.user(o.value, `u${o.value.slice(-4)}`);
+    const scan = (list) => { for (const o of list) { if (o.type === 6) users[o.value] = this.user(o.value, `u${o.value.slice(-4)}`); if (o.options) scan(o.options); } };
+    scan(options);
     return this.interact({
       type: 2, guild_id: guildId, channel_id: channelId, channel: this.interactionChannel(channelId),
       member: this.member(userId),
@@ -248,6 +265,20 @@ class FakeDiscord {
         ...(Object.keys(users).length ? { resolved: { users } } : {}),
       },
     });
+  }
+
+  // Kliknięcie przycisku lub menu na wiadomości w rozmowie prywatnej z botem (bez serwera i bez `member`, jak w Discordzie).
+  dmComponent(userId, channelId, customId, { values, type = 2, messageId, idle = 800 } = {}) {
+    const msgs = this.messages.get(channelId) || [];
+    const message = (messageId && msgs.find((m) => m.id === messageId))
+      || [...msgs].reverse().find((m) => m.author.id === ID.app && m.components && m.components.length)
+      || this.makeMessage(this.newId(), channelId, ID.app, 'x', { components: [] });
+    return this.interact({
+      type: 3, guild_id: undefined, guild_locale: undefined, context: 1, channel_id: channelId,
+      channel: { id: channelId, type: 1, recipients: [this.user(userId, `u${userId.slice(-4)}`)] },
+      user: this.user(userId, `u${userId.slice(-4)}`), message,
+      data: { custom_id: customId, component_type: type, ...(values ? { values } : {}) },
+    }, { idle });
   }
 
   // Wysłanie okna (modala). fields: {id: tekst | [id osób]}. legacy = pola w wierszach akcji (stary format).
@@ -279,8 +310,13 @@ class FakeDiscord {
     req.on('data', (c) => chunks.push(c));
     req.on('end', () => {
       let body = null;
-      const raw = Buffer.concat(chunks).toString('utf8');
-      if (raw) { try { body = JSON.parse(raw); } catch { body = raw; } }
+      const buf = Buffer.concat(chunks);
+      if (/^multipart\/form-data/i.test(String(req.headers['content-type'] || ''))) {
+        body = this.parseMultipart(buf, String(req.headers['content-type']));
+      } else {
+        const raw = buf.toString('utf8');
+        if (raw) { try { body = JSON.parse(raw); } catch { body = raw; } }
+      }
       const url = new URL(req.url, 'http://x');
       const path = decodeURIComponent(url.pathname).replace(/^\/api\/v10/, '');
       this.requests.push({ method: req.method, path, body, query: Object.fromEntries(url.searchParams) });
@@ -304,6 +340,30 @@ class FakeDiscord {
         res.end(JSON.stringify({ message: String(err.stack || err), code: 0 }));
       }
     });
+  }
+
+  // Wiadomość z załącznikami: część `payload_json` (JSON) i pliki; zwraca JSON z dodatkowym polem __files: [{name, data, contentType}].
+  parseMultipart(buf, contentType) {
+    const bm = /boundary=(?:"([^"]+)"|([^;]+))/i.exec(contentType);
+    const delimiter = Buffer.from(`--${bm[1] || bm[2]}`);
+    const out = { __files: [] };
+    let pos = buf.indexOf(delimiter);
+    while (pos >= 0) {
+      const start = pos + delimiter.length;
+      if (buf.subarray(start, start + 2).toString() === '--') break;
+      const next = buf.indexOf(delimiter, start);
+      if (next < 0) break;
+      const part = buf.subarray(start + 2, next - 2); // bez CRLF po granicy i przed następną
+      const headEnd = part.indexOf('\r\n\r\n');
+      const head = part.subarray(0, headEnd).toString('utf8');
+      const data = part.subarray(headEnd + 4);
+      const name = /name="([^"]*)"/.exec(head)?.[1];
+      const filename = /filename="([^"]*)"/.exec(head)?.[1];
+      if (name === 'payload_json') Object.assign(out, JSON.parse(data.toString('utf8')));
+      else out.__files.push({ field: name, name: filename || name, data: Buffer.from(data), contentType: /content-type:\s*([^\r\n]+)/i.exec(head)?.[1] || 'application/octet-stream' });
+      pos = next;
+    }
+    return out;
   }
 
   event(token, kind, payload) {
@@ -371,7 +431,7 @@ class FakeDiscord {
       if (!th) return undefined;
       if (body.applied_tags) th.applied_tags = body.applied_tags;
       if (body.archived !== undefined) th.thread_metadata.archived = body.archived;
-      this.dispatch('THREAD_UPDATE', th);
+      if (!this.muteThreadUpdates) this.dispatch('THREAD_UPDATE', th); // testy mogą wyciszyć zdarzenie, żeby sprawdzić ścieżkę bez niego
       return th;
     }
     if (method === 'POST' && (m = /^\/channels\/(\d+)\/threads$/.exec(path))) {
@@ -385,8 +445,25 @@ class FakeDiscord {
       setTimeout(() => this.dispatch('THREAD_CREATE', { ...th, newly_created: true }), 10);
       return out;
     }
+    if (method === 'GET' && (m = /^\/users\/(\d+)$/.exec(path))) {
+      if (!this.knownUser(m[1])) return { __error: { status: 404, code: 10013, message: 'Unknown User' } };
+      return this.user(m[1], `u${m[1].slice(-4)}`);
+    }
+    if (method === 'POST' && path === '/users/@me/channels') {
+      if (!this.knownUser(body.recipient_id)) return { __error: { status: 404, code: 10013, message: 'Unknown User' } };
+      let dm = this.dmChannelOf(body.recipient_id);
+      if (!dm) { dm = { id: this.newId(), type: 1, last_message_id: null, recipients: [this.user(body.recipient_id, `u${body.recipient_id.slice(-4)}`)] }; this.dmChannels.push(dm); }
+      return dm;
+    }
     if (method === 'POST' && (m = /^\/channels\/(\d+)\/messages$/.exec(path))) {
-      const msg = this.makeMessage(this.newId(), m[1], ID.app, body.content || '', { embeds: body.embeds || [], components: body.components || [] });
+      const dm = this.dmChannels.find((c) => c.id === m[1]);
+      if (dm && this.blockedDms.has(dm.recipients[0].id)) return { __error: { status: 403, code: 50007, message: 'Cannot send messages to this user' } };
+      const attachments = (body.__files || []).map((f) => {
+        const id = this.newId();
+        this.files.set(id, { name: f.name, data: f.data });
+        return { id, filename: f.name, size: f.data.length, content_type: f.contentType, url: `http://127.0.0.1/attachments/${id}/${f.name}`, proxy_url: `http://127.0.0.1/attachments/${id}/${f.name}` };
+      });
+      const msg = this.makeMessage(this.newId(), m[1], ID.app, body.content || '', { embeds: body.embeds || [], components: body.components || [], attachments });
       msg.allowed_mentions = body.allowed_mentions;
       this.messages.set(m[1], [...(this.messages.get(m[1]) || []), msg]);
       return msg;

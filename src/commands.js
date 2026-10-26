@@ -34,6 +34,27 @@ function buildCommands() {
     guildOnly(new SlashCommandBuilder()
       .setName('ustaw-tablice')
       .setDescription('Ustaw żywą tablicę kanban na tym kanale (tylko kierownictwo i moderacja)')),
+    guildOnly(new SlashCommandBuilder()
+      .setName('rozliczenia')
+      .setDescription('Rozliczenia z osobami piszącymi: stawki, premie, protokoły (tylko zarząd)')
+      .addSubcommand((c) => c
+        .setName('stawka')
+        .setDescription('Ustaw stawkę za jeden tekst dla osoby (widzi ją tylko zarząd)')
+        .addUserOption((o) => o.setName('osoba').setDescription('Kto pisze').setRequired(true))
+        .addStringOption((o) => o.setName('kwota').setDescription('Kwota za tekst tak, jak ma stać w protokole, np. 120 albo 120,50; „brak” usuwa stawkę').setRequired(true).setMaxLength(20))
+        .addStringOption((o) => o.setName('imie').setDescription('Imię i nazwisko do protokołu (domyślnie nazwa na serwerze)').setMaxLength(80)))
+      .addSubcommand((c) => c
+        .setName('stawki')
+        .setDescription('Pokaż ustawione stawki (tylko Ty widzisz odpowiedź)'))
+      .addSubcommand((c) => c
+        .setName('premia')
+        .setDescription('Dodaj premię do tego tekstu, np. za post na własnych social mediach (użyj w poście z zadaniem)')
+        .addStringOption((o) => o.setName('kwota').setDescription('Kwota premii, np. 20 albo 20,50; „brak” usuwa nierozliczone premie tego tekstu').setRequired(true).setMaxLength(20))
+        .addStringOption((o) => o.setName('opis').setDescription('Za co, np. post na Facebooku').setMaxLength(80)))
+      .addSubcommand((c) => c
+        .setName('szkic')
+        .setDescription('Przygotuj szkic protokołów za miesiąc i wyślij go do mnie w wiadomości prywatnej')
+        .addStringOption((o) => o.setName('miesiac').setDescription('Miesiąc, np. 2026-10 albo 10.2026 (puste = poprzedni)').setMaxLength(10)))),
   ];
 }
 

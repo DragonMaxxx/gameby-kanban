@@ -7,6 +7,8 @@ Pomysł, Przydzielone, W pisaniu, Do redakcji, Do publikacji, Opublikowane. Bot 
 (kolumny jako osobne kolorowe bloki), kartę z przyciskami w każdym poście, formularz „Dodaj zadanie”, filtry i codzienne podsumowanie.
 Opcjonalnie dochodzi **tablica z przeciąganiem kart**: strona działająca w przeglądarce i (na małych serwerach) jako Activity w Discordzie
 (rozdział „Tablica z przeciąganiem” niżej). Bez niej wszystko działa jak dotąd.
+Dla zarządu dochodzą **rozliczenia z osobami piszącymi**: stała stawka za tekst, premie, a na początku miesiąca szkic protokołów (PDF) do zatwierdzenia i wysyłka
+do każdej osoby w wiadomości prywatnej (rozdział „Rozliczenia”). Bez ustawienia `FINANCE_USER_IDS` ta część jest wyłączona.
 
 ## Jak to wygląda w praktyce
 
@@ -80,8 +82,43 @@ Zadania na dalszych etapach zostają tam, gdzie są.
 - `/tablica [moje] [publicznie]`: tablica jednorazowo, w jednej wiadomości (prywatnie albo na bieżący kanał redakcji). Przydaje się na telefonie, gdy nie chcesz wchodzić na kanał z tablicą.
 - `/panel`: dodaje świeżą kartę do posta (zastępuje poprzednią). Przydaje się w starych postach z panelem z poprzedniej wersji bota.
 - `/podsumowanie`: to samo, co bot wysyła rano.
+- `/rozliczenia stawka | stawki | premia | szkic`: tylko zarząd (`FINANCE_USER_IDS`), odpowiedzi są prywatne. Opis w rozdziale „Rozliczenia” niżej.
 
-## Podsumowanie dnia
+## Rozliczenia z osobami piszącymi (tylko zarząd)
+
+**Co to robi.** Każda osoba ma stałą stawkę za tekst. Tekst liczy się do miesiąca, w którym został **oddany do redakcji**, czyli przeszedł do statusu „Do redakcji”
+(przyciskiem na karcie, na stronie albo ręczną zmianą tagu: bot zapisuje wtedy datę oddania; jeśli tekst wróci do pisania, data znika i zapisze się nowa przy kolejnym oddaniu).
+Pierwszego dnia roboczego następnego miesiąca, od godziny podsumowania (`DIGEST_HOUR`), bot przygotowuje szkic protokołów za poprzedni miesiąc i wysyła **Tobie** w wiadomości prywatnej.
+Dopiero po Twoim zatwierdzeniu każda osoba dostaje swój protokół (PDF) w wiadomości prywatnej z prośbą, żeby sprawdziła zestawienie, dopisała liczbę godzin, podpisała i odesłała e-mailem.
+
+**Włączenie.** W `.env` (na Railway w zakładce Variables) ustaw `FINANCE_USER_IDS`: numery osób z zarządu, oddzielone przecinkami
+(numer: Discord, Ustawienia, Zaawansowane, Tryb dewelopera włączony, potem prawy przycisk na osobie, „Kopiuj ID użytkownika”).
+Opcjonalnie `PROTOCOL_ISSUER` (nazwa zleceniodawcy na protokole, domyślnie `GameBy.pl`), `PROTOCOL_RETURN_EMAIL` (adres, na który osoby mają odsyłać podpisane protokoły) i `PROTOCOL_TITLE`
+(tytuł dokumentu, domyślnie „Protokół rozliczenia tekstów”). Bot zapisuje wtedy początek rozliczeń: protokół powstanie za miesiąc, w którym włączyłeś funkcję (jeśli włączysz ją w październiku, pierwszy szkic przyjdzie na początku listopada za październik).
+
+**Krok po kroku.**
+
+1. **Stawki:** `/rozliczenia stawka osoba:@ktoś kwota:150 imie:Imię Nazwisko`. Kwotę wpisujesz tak, jak ma stać w protokole (`150`, `150,50`; bot niczego nie przelicza na brutto ani netto). `imie` to imię i nazwisko do protokołu
+   (domyślnie nazwa z serwera); przy zmianie samej kwoty imię zostaje. `/rozliczenia stawki` pokazuje wszystkie stawki (tylko Tobie), a `kwota:brak` usuwa stawkę.
+2. **Premie:** w poście z zadaniem `/rozliczenia premia kwota:20 opis:post na Facebooku`. Można dodać po publikacji i kilka do jednego tekstu. Premia trafia do miesiąca, w którym tekst oddano, jeśli jego protokół nie jest jeszcze zatwierdzony,
+   a w przeciwnym razie do bieżącego miesiąca. `kwota:brak` usuwa nierozliczone premie tego tekstu.
+3. **Szkic:** bot wysyła Ci najpierw podgląd PDF-ów (po 10 w wiadomości), a na końcu podsumowanie: kto, ile tekstów i premii, kwota, oraz ostrzeżenia. Ręcznie: `/rozliczenia szkic` (poprzedni miesiąc) albo `/rozliczenia szkic miesiac:2026-10`.
+   Ostrzeżenia: **bez stawki** (osoba nie dostanie protokołu, ustaw stawkę), **bez osoby** (przydziel osobę na karcie) i **bez daty oddania** (menu do zaznaczenia, patrz niżej). Po poprawkach użyj **Odśwież szkic**.
+4. **Zatwierdzenie:** **Wyślij do osób**, potem potwierdzenie („Tak, wyślij”). Przed wysyłką bot sprawdza jeszcze raz, czy nic się nie zmieniło od szkicu (nowy tekst, premia, stawka, zmiana statusu): jeśli tak,
+   nic nie wysyła i pokazuje nowy szkic do ponownego zatwierdzenia. Po wysyłce dane są **zamrożone**: teksty i premie z protokołu nie wejdą do żadnego następnego i nie zmienisz ich wstecz.
+   Osobom, do których wiadomość nie dotarła (mają wyłączone wiadomości prywatne od członków serwera), bot pokaże listę i przycisk **Ponów wysyłkę**.
+5. **Uzupełnienie:** teksty, które zostały poza protokołem (np. osobie brakowało stawki), rozliczysz później: `/rozliczenia szkic miesiac:2026-10` po wysłaniu tworzy protokół uzupełniający tylko z tego, co zostało. „Pomiń ten miesiąc” zamyka szkic bez rozliczania.
+
+**Pierwszy miesiąc.** Teksty oddane przed wdrożeniem nie mają daty oddania. Szkic pokaże je w menu „Zaznacz teksty oddane w: …” (tylko posty założone w tym lub poprzednim miesiącu, żeby nie wracały stare opublikowane teksty);
+zaznaczasz te, które faktycznie oddano w rozliczanym miesiącu, a szkic odświeża się sam.
+
+**Kto co widzi.** Stawki, kwoty, premie i szkice widzi tylko zarząd: odpowiedzi komend są prywatne, szkic idzie do wiadomości prywatnych, a kwoty nie trafiają na kartę zadania, tablicę, stronę z tablicą, podsumowanie dnia ani do logów.
+Osoba widzi wyłącznie swój protokół, dopiero po zatwierdzeniu. Uwaga: stawki i kwoty leżą w pliku stanu (`state.json`), więc widzi je każdy, kto ma dostęp do wolumenu bota lub projektu na Railway.
+
+**Co jest w PDF.** Tytuł i miesiąc, zleceniodawca, imię i nazwisko osoby, tabela tekstów (tytuł, data oddania, stawka, kwota), premie, suma „Razem do wypłaty”, pole na liczbę przepracowanych godzin, pole na uwagi i miejsca na dwa podpisy.
+Suma, godziny i podpis są zawsze na jednej stronie. **Treść to roboczy szablon, nie wzór sprawdzony przez księgową ani prawnika:** bot nie wie, czy rozliczacie się umową zlecenia, o dzieło czy fakturą, i nie liczy podatków ani składek. Pokaż protokół księgowej przed pierwszą wysyłką
+i daj mi znać, co zmienić (albo przyślij własny wzór), a dopasuję układ i brzmienie.
+
 
 Raz dziennie, w dni robocze, między 9:00 a 15:00 czasu warszawskiego, na `#ogolne` w kategorii REDAKCJA (jeśli bot wystartuje później niż 9:00, nadrobi to w tym oknie).
 Sekcje: Po terminie, Termin w ciągu 3 dni, Czeka na redakcję, Gotowe do publikacji oraz **Bez osoby, do wzięcia** (do 8 pozycji; zadania z Do redakcji i Do publikacji są w swoich sekcjach). Liczy się ten termin, który pilnuje zadania (patrz „Dwa terminy”): po oddaniu tekstu zadanie jest „po terminie” dopiero wtedy, gdy minie termin publikacji, i wtedy pokazuje się w sekcji „Po terminie” zamiast w „Czeka na redakcję” (nie powtarza się w obu).
@@ -105,6 +142,9 @@ Kopia zapasowa pliku:
 ```
 docker compose cp kanban:/data/state.json ./state-kopia.json
 ```
+
+**Rozliczenia** są w tym samym pliku: top-level `fin` (stawki, imiona do protokołów, historia protokołów z zamrożonymi zestawieniami i wynikiem wysyłki), a w danych zadania klucze `h` (data oddania do redakcji),
+`s` (miesiąc rozliczenia tekstu) i `b` (lista premii). Kopia pliku zawiera więc stawki i kwoty; traktuj ją jak dane poufne.
 
 Posty założone ręcznie albo przez poprzednią wersję bota: dopóki nikt nie ustawi osoby lub terminu kartą, bot czyta je jak dawniej z pierwszej wiadomości posta
 (linie `Odpowiedzialny: @osoba` i `Termin: 05.11.2026`, wymaga Message Content Intent, patrz niżej), a bez tych linii osobą jest autor posta.
@@ -296,7 +336,7 @@ Dokumentacja Railway nie podaje limitu długości zmiennej. Jeśli Railway odrzu
 6. Zaloguj się na `https://tablica.gameby.pl` i przesuń testową kartę. Dopiero potem usuń `STATE_SEED_B64`, a na komputerze `docker compose --profile tunnel down` (**bez** `-v`; wolumen z kopią zostaw na wszelki wypadek na kilka tygodni).
 
 **Kolejne wersje na Railway**: wgraj zmienione pliki do repozytorium na GitHubie (cały folder `src`, `web`, `test` itd., nie tylko pojedyncze pliki), a Railway sam zbuduje i wdroży nową wersję. Plik stanu na wolumenie zostaje, a w wersji z dwoma terminami nic nie trzeba w nim przenosić
-(nowy klucz `p` pojawia się tylko tam, gdzie ustawisz termin publikacji). Wdrożenie restartuje bota na kilka minut (wolumen potrafi się montować z opóźnieniem), a sesje logowania na stronie są w pamięci, więc po restarcie trzeba zalogować się ponownie.
+(nowy klucz `p` pojawia się tylko tam, gdzie ustawisz termin publikacji; rozliczenia dodają klucze `h`, `s`, `b` i `fin`, także bez migracji; żeby je włączyć, dopisz w Variables `FINANCE_USER_IDS`). Wdrożenie restartuje bota na kilka minut (wolumen potrafi się montować z opóźnieniem), a sesje logowania na stronie są w pamięci, więc po restarcie trzeba zalogować się ponownie.
 Karty w postach przepisują się dopiero przy następnej zmianie w danym poście (albo po `/panel`), więc do tego czasu starsze karty pokazują jeszcze pole „Termin” zamiast dwóch pól; przycisk „Termin” na takiej karcie działa i otwiera już okno „Terminy”.
 
 **Czego ta instrukcja nie obejmuje:** nie testowałem wdrożenia na prawdziwym Railway, a kolejność powyżej i nagłówki bramy opisuję według dokumentacji i odpowiedzi pracowników Railway, które nie są stałą gwarancją. Po pierwszym wdrożeniu sprawdź sam logowanie i to,
@@ -306,7 +346,7 @@ czy po kilkunastu błędnych próbach z jednego telefonu inna osoba nadal się z
 
 Wszystkie w pliku `.env`, opisane w `.env.example`: forum (`FORUM_NAME` lub `FORUM_ID`, domyślnie `artykuly`), kanał podsumowania (`DIGEST_CHANNEL_NAME` lub `DIGEST_CHANNEL_ID`),
 godzina i dni podsumowania (`DIGEST_HOUR`, `DIGEST_WEEKDAYS`), oznaczanie osób w podsumowaniu (`DIGEST_PING=1`), wyłączenie podsumowania (`DIGEST_ENABLED=0`),
-strefa czasowa (`TIMEZONE`), strona z przeciąganiem (`DISCORD_CLIENT_SECRET`, `PUBLIC_URL`, `HOST_PORT`, `SESSION_HOURS`, `TRUST_PROXY`, `ACTIVITY`, `MEMBERS_INTENT`, `TUNNEL_TOKEN`; patrz rozdział wyżej), `REGISTER_COMMANDS=0` (nie rejestruj komend przy starcie), `BOARD_DEBOUNCE_MS` (po ilu milisekundach od zmiany odświeżać tablicę, domyślnie 2000), `STATE_FILE` (zwykle bez zmian) oraz, tylko na Railway, `PROXY_TYPE`, `STATE_SEED_B64` i `PORT` (patrz rozdział „Railway”).
+strefa czasowa (`TIMEZONE`), strona z przeciąganiem (`DISCORD_CLIENT_SECRET`, `PUBLIC_URL`, `HOST_PORT`, `SESSION_HOURS`, `TRUST_PROXY`, `ACTIVITY`, `MEMBERS_INTENT`, `TUNNEL_TOKEN`; patrz rozdział wyżej), `REGISTER_COMMANDS=0` (nie rejestruj komend przy starcie), `BOARD_DEBOUNCE_MS` (po ilu milisekundach od zmiany odświeżać tablicę, domyślnie 2000), `STATE_FILE` (zwykle bez zmian), rozliczenia (`FINANCE_USER_IDS`, `PROTOCOL_ISSUER`, `PROTOCOL_RETURN_EMAIL`, `PROTOCOL_TITLE`; patrz rozdział „Rozliczenia”) oraz, tylko na Railway, `PROXY_TYPE`, `STATE_SEED_B64` i `PORT` (patrz rozdział „Railway”).
 Jeśli na serwerze są dwa kanały o tej samej nazwie, bot wybiera ten niewidoczny dla @everyone. Kanał wskazany numerem (`DIGEST_CHANNEL_ID`) to Twoja świadoma decyzja i bot go nie sprawdza.
 
 ## Gdy coś nie działa
@@ -322,6 +362,9 @@ Jeśli na serwerze są dwa kanały o tej samej nazwie, bot wybiera ten niewidocz
 - **Zmiana statusu kończy się błędem:** bot musi mieć uprawnienie „Zarządzanie wątkami” (jest w linku zaproszenia) oraz widzieć forum.
 - **Brak podsumowania rano:** sprawdź w logach „Podsumowanie dnia pominięte” (np. brak uprawnień do pisania na kanale). Błąd konfiguracji bot zgłasza raz i do końca dnia nie ponawia;
   chwilowe błędy Discorda ponawia po 10 minutach, do czterech razy.
+- **Rozliczenia: „Rozliczenia są wyłączone”:** brak `FINANCE_USER_IDS` albo twojego numeru na liście. **Szkic nie przyszedł pierwszego dnia roboczego:** sprawdź, czy masz włączone wiadomości prywatne od członków serwera (bot ponawia co pół godziny, a w logach jest „nikt z zarządu nie dostał szkicu”),
+  albo zażądaj go ręcznie `/rozliczenia szkic`. W logu nie ma kwot, tylko liczby osób. **Osoba nie dostała protokołu:** ma wyłączone wiadomości prywatne od członków serwera (Discord, Ustawienia, Prywatność i bezpieczeństwo); po zmianie kliknij **Ponów wysyłkę**
+  albo prześlij jej PDF ze szkicu sam. **„Dane zmieniły się od czasu szkicu”:** to zabezpieczenie, nic nie zostało wysłane; zatwierdź nowy szkic.
 - **Komputer się uśpił:** bot nie działa, gdy komputer śpi lub Docker Desktop jest wyłączony, a tablica stoi w miejscu. Po wybudzeniu bot połączy się sam i odświeży tablicę;
   podsumowanie wyśle, jeśli jeszcze mieści się w oknie 9:00-15:00.
 - **Strona się nie uruchamia:** w logach szukaj „PUBLIC_URL” (zły adres: musi być `https://…` bez ścieżki) albo „HTTP_PORT”. Bez `DISCORD_CLIENT_SECRET` strony nie ma, a reszta bota działa.
@@ -345,6 +388,9 @@ Jeśli na serwerze są dwa kanały o tej samej nazwie, bot wybiera ten niewidocz
   Bot edytuje tylko te wiadomości, które się zmieniły. Raz na 10 minut przechodzi po wszystkich (to odświeża też etykiety „za 2 dni” → „jutro” i wykrywa ręcznie usunięte wiadomości).
 - Kolumna na tablicy mieści około 3800 znaków, czyli kilkadziesiąt zadań; reszta jest w liczniku („… i 12 więcej”). Opublikowane pokazują pięć najnowszych postów (według numeru posta, nie daty publikacji). Zadania oddane do redakcji są „po terminie” dopiero po terminie publikacji (jeśli go mają), a opublikowane nigdy (patrz „Dwa terminy”).
 - Osoba, termin i priorytet są w pliku stanu bota (patrz wyżej), a nie w Discordzie.
+- **Rozliczenia nie są księgowością.** Bot zlicza teksty razy stawka plus premie i wysyła zestawienie do podpisu. Nie wystawia faktur ani rachunków, nie liczy podatków, składek ani brutto/netto, nie śledzi, kto odesłał podpisany protokół,
+  i nie zna korekt ujemnych: błąd po wysyłce poprawiasz poza botem albo w kolejnym miesiącu. Teksty liczą się do osoby przypisanej w chwili szkicu, a stawka to ta z chwili szkicu (zmiana stawki w trakcie miesiąca dotyczy wszystkich tekstów z tego miesiąca).
+  Pierwszy dzień roboczy to poniedziałek-piątek; święta bot pomija (szkic i tak czeka na Twoje zatwierdzenie). Treść PDF to roboczy szablon do sprawdzenia z księgową.
 - Gdy osoba przypisana do zadania opuści serwer, zadanie zostaje przypisane do niej (na tablicy zobaczysz nieczytelne oznaczenie). Zwolnij je `/edytuj zwolnij:True` albo przydziel komuś innemu; bot nie śledzi odejść z serwera.
 - Termin bez roku (`05.11`) bot rozumie jako najbliższą taką datę w przyszłości. Jeśli wpiszesz datę z przeszłości bez roku, dostaniesz następny rok; bot zawsze pokazuje w odpowiedzi, jaki termin zapisał.
 - Przyciski i komendy są dla każdego, kto widzi forum (rola Redakcja). Bot nie rozróżnia osób tylko do odczytu, jeśli na forum są takie uprawnienia.

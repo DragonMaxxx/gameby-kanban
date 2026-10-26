@@ -7,6 +7,7 @@ const {
 const B = require('./board');
 const { cardPayload, newTaskModal, dueModal } = require('./ui');
 const { createLiveBoard } = require('./live');
+const { createSettlements } = require('./settlements');
 
 const EPHEMERAL = MessageFlags.Ephemeral;
 const META_TTL_MS = 5 * 60 * 1000;
@@ -187,11 +188,14 @@ function createBot({ client, config, store, now = () => new Date(), log = consol
   // Trzymamy je w stanie bota, więc działają także w postach założonych ręcznie. Klucze: a (osoba), d (termin oddania tekstu),
   // p (termin publikacji), u (pilne), c (id wiadomości z kartą). Brak klucza a lub d oznacza "nie ustawiono": wtedy sięgamy
   // po domyślne wartości. Termin publikacji ustawia się tylko na karcie, komendą albo na stronie (z postów go nie czytamy).
+  // Rozliczenia (tylko dla zarządu, nigdy na kartę ani stronę): h (data oddania do redakcji), s (miesiąc rozliczenia tekstu),
+  // b (lista premii: i, a w groszach, n, m miesiąc, s miesiąc rozliczenia).
   const metaOf = (id) => (store.get('tasks') || {})[id];
   function patchMeta(id, patch) {
     const all = { ...(store.get('tasks') || {}) };
     const next = { ...(all[id] || {}), ...patch };
-    if (!next.p) delete next.p; // brak terminu publikacji nie zostawia śladu w stanie (w odróżnieniu od d, gdzie brak klucza znaczy "nie ustawiono")
+    for (const k of ['p', 'h', 's']) if (!next[k]) delete next[k]; // puste wartości nie zostawiają śladu w stanie (w odróżnieniu od d, gdzie brak klucza znaczy "nie ustawiono")
+    if (!next.b || !next.b.length) delete next.b;
     all[id] = next;
     store.set('tasks', all);
   }
@@ -301,6 +305,9 @@ function createBot({ client, config, store, now = () => new Date(), log = consol
     return role ? `kanał ${leakText(role)}` : null;
   };
   const live = createLiveBoard({ client, config, store, now, log, collect: collectBoard, guard });
+  const settlements = createSettlements({
+    client, config, store, now, log, UserError, today, collectBoard, metaOf, patchMeta, withLock, onTask, resolveTask,
+  });
 
   // Każda zmiana zadań podnosi wersję tablicy i odświeża żywą tablicę. Strona z przeciąganiem korzysta z tej samej wersji,
   // więc kilka osób przy ekranie nie wysyła do Discorda kilkunastu zapytań co kilka sekund.
@@ -319,7 +326,7 @@ function createBot({ client, config, store, now = () => new Date(), log = consol
   const UPDATE_IDS = new Set(['kb:prev', 'kb:next', 'kb:status', 'kb:take', 'kb:release', 'kb:assign', 'kb:duemodal']);
   const isUpdate = (i) => {
     const id = i.customId; // komendy nie mają customId
-    return typeof id === 'string' && (UPDATE_IDS.has(id) || id.startsWith('kb:go:') || id.startsWith('kb:urgent:'));
+    return typeof id === 'string' && (UPDATE_IDS.has(id) || id.startsWith('kb:go:') || id.startsWith('kb:urgent:') || id.startsWith('kb:fin:'));
   };
 
   async function editCardMessage(thread, messageId, payload) {
@@ -379,6 +386,7 @@ function createBot({ client, config, store, now = () => new Date(), log = consol
   async function applyChange(interaction, ctx, { patch = {}, tags = null, reason, pingUserId = null }) {
     const { st, thread } = ctx;
     const wasArchived = thread.archived;
+    const statusBefore = tags ? B.currentStatus(thread.appliedTags, st) : null;
     if (wasArchived) await thread.setArchived(false, reason);
     try {
       if (tags) await thread.setAppliedTags(tags, reason);
@@ -387,6 +395,7 @@ function createBot({ client, config, store, now = () => new Date(), log = consol
       throw err;
     }
     if (Object.keys(patch).length) patchMeta(thread.id, patch);
+    if (tags) settlements.noteStatusChange(thread.id, statusBefore, B.currentStatus(thread.appliedTags, st)); // data oddania do redakcji (rozliczenia)
     touch();
     const task = await resolveTask(thread, st, today());
     let cardError = null;
@@ -806,8 +815,18 @@ function createBot({ client, config, store, now = () => new Date(), log = consol
     }
   }
 
-  function onThreadUpdate(_old, thread) {
-    if (forumOf(thread)) touch();
+  // Ręczna zmiana tagu statusu w Discordzie też zapisuje datę oddania tekstu (zmiany bota widzimy już w applyChange).
+  function onThreadUpdate(old, thread) {
+    const forum = forumOf(thread);
+    if (!forum) return;
+    touch();
+    try {
+      const st = B.statusTags(forum.availableTags);
+      if (st.missing.length || !old || !old.appliedTags) return;
+      settlements.noteStatusChange(thread.id, B.currentStatus(old.appliedTags, st), B.currentStatus(thread.appliedTags, st));
+    } catch (err) {
+      log.error(`Zmiana posta ${thread.id}: ${err.message}`);
+    }
   }
 
   function onThreadDelete(thread) {
@@ -908,6 +927,7 @@ function createBot({ client, config, store, now = () => new Date(), log = consol
     panel: cmdPanel,
     podsumowanie: cmdPodsumowanie,
     'ustaw-tablice': cmdUstawTablice,
+    rozliczenia: (interaction) => settlements.command(interaction),
   };
 
   // Przyciski i menu, które odpowiadają "aktualizacją wiadomości" (odroczenie tego samego typu).
@@ -923,6 +943,12 @@ function createBot({ client, config, store, now = () => new Date(), log = consol
 
   async function onInteraction(interaction) {
     try {
+      // Przyciski i menu szkicu rozliczeń przychodzą z wiadomości prywatnych (bez numeru serwera); sprawdza je moduł rozliczeń.
+      if (!interaction.guildId && (interaction.isButton() || interaction.isAnySelectMenu()) && String(interaction.customId).startsWith('kb:fin:')) {
+        await interaction.deferUpdate();
+        await settlements.onComponent(interaction);
+        return;
+      }
       if (interaction.guildId !== config.guildId) return;
       // Discord daje 3 sekundy na pierwszą odpowiedź, a pobranie forum i wątków bywa wolniejsze: odpowiadamy od razu.
       if (interaction.isChatInputCommand()) {
@@ -1130,7 +1156,8 @@ function createBot({ client, config, store, now = () => new Date(), log = consol
   };
 
   return {
-    onInteraction, onThreadCreate, onThreadUpdate, onThreadDelete, digestTick, liveTick: () => live.tick(), selfCheck, collectTasks, getForum, live, web,
+    onInteraction, onThreadCreate, onThreadUpdate, onThreadDelete, digestTick, liveTick: () => live.tick(), financeTick: () => settlements.financeTick(),
+    selfCheck, collectTasks, getForum, live, web,
   };
 }
 

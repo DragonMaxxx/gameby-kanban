@@ -65,6 +65,18 @@ function loadConfig(rawEnv = process.env) {
     if (!stateSeed || typeof stateSeed !== 'object' || Array.isArray(stateSeed)) throw new ConfigError('STATE_SEED_B64: po zdekodowaniu to nie jest plik stanu (JSON z obiektem).');
   }
 
+  // Rozliczenia z osobami piszącymi: kto je prowadzi (zarząd), od kogo jest protokół i dokąd go odsyłać.
+  // Bez FINANCE_USER_IDS funkcja jest wyłączona: stawki i kwoty nie są wtedy nigdzie zbierane ani pokazywane.
+  const financeUserIds = [];
+  for (const raw of String(env.FINANCE_USER_IDS || '').split(',')) {
+    const id = raw.trim();
+    if (!id) continue;
+    if (!/^\d{15,25}$/.test(id)) throw new ConfigError('FINANCE_USER_IDS: numery osób z zarządu (same cyfry), oddzielone przecinkami.');
+    if (!financeUserIds.includes(id)) financeUserIds.push(id);
+  }
+  const returnEmail = (env.PROTOCOL_RETURN_EMAIL || '').trim() || null;
+  if (returnEmail && !/^[^\s@<>]+@[^\s@<>]+\.[^\s@<>]+$/.test(returnEmail)) throw new ConfigError('PROTOCOL_RETURN_EMAIL: podaj adres e-mail, np. rozliczenia@gameby.pl.');
+
   return {
     token,
     guildId,
@@ -81,6 +93,12 @@ function loadConfig(rawEnv = process.env) {
       activity: bool(env.ACTIVITY, false),
       // Lista wszystkich osób z dostępem do forum w oknie przydziału (wymaga Server Members Intent w Developer Portal).
       membersIntent: bool(env.MEMBERS_INTENT, false),
+    },
+    finance: {
+      userIds: financeUserIds,
+      issuer: (env.PROTOCOL_ISSUER || 'GameBy.pl').trim().slice(0, 80),
+      returnEmail,
+      title: (env.PROTOCOL_TITLE || 'Protokół rozliczenia tekstów').trim().slice(0, 80),
     },
     forumId: (env.FORUM_ID || '').trim() || null,
     forumName: (env.FORUM_NAME || 'artykuly').trim(),

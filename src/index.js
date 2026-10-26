@@ -58,7 +58,7 @@ async function main({
       if (config.registerCommands) {
         try {
           await c.application.commands.set(buildCommands().map((cmd) => cmd.toJSON()), config.guildId);
-          log.log('Zarejestrowano komendy: /tablica, /zadanie, /edytuj, /panel, /podsumowanie, /ustaw-tablice.');
+          log.log('Zarejestrowano komendy: /tablica, /zadanie, /edytuj, /panel, /podsumowanie, /ustaw-tablice, /rozliczenia.');
         } catch (err) {
           log.error(`Nie udało się zarejestrować komend: ${err.message}`);
         }
@@ -74,7 +74,7 @@ async function main({
           log.error(`Nie udało się uruchomić strony z tablicą (bot działa dalej): ${err.message}`);
         }
       }
-      if (scheduler) setInterval(() => { bot.digestTick(); bot.liveTick(); }, 60 * 1000).unref();
+      if (scheduler) setInterval(() => { bot.digestTick(); bot.liveTick(); bot.financeTick(); }, 60 * 1000).unref();
       resolve();
     });
   });

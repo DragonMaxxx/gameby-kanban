@@ -53,7 +53,7 @@ Konsekwencje w poszczególnych miejscach:
 - ping w podsumowaniu dnia dostaje tylko autor, który **jeszcze pisze**. Termin publikacji po oddaniu tekstu pilnuje redakcja, więc autor nie jest już wołany.
 
 Jeśli redakcja odeśle tekst do poprawek (status wraca do W pisaniu albo wcześniejszy), znowu liczy się wcześniejszy z dwóch terminów, więc zadanie może stać się „po terminie” od nowa.
-Bot nie zapamiętuje, kiedy dokładnie tekst oddano, więc nie wyliczy „oddano 2 dni po terminie”. Które statusy znaczą „tekst oddany”, ustala jedna stała `WRITING_DONE` na początku `src/board.js`, a który termin się liczy, funkcja `activeDue` w tym samym pliku.
+Tablica nie pokazuje, kiedy dokładnie tekst oddano, więc nie wyliczy „oddano 2 dni po terminie” (datę oddania zapisują tylko rozliczenia, widoczne dla zarządu). Które statusy znaczą „tekst oddany”, ustala jedna stała `WRITING_DONE` na początku `src/board.js`, a który termin się liczy, funkcja `activeDue` w tym samym pliku.
 
 Termin publikacji ustawisz: w formularzu nowego zadania (nagłówek tablicy, strona), w komendzie `/zadanie … publikacja:12.11`, przyciskiem **Terminy** na karcie, komendą `/edytuj publikacja:…` albo w oknie zadania na stronie.
 Posty zakładane ręcznie nie mają linii z terminem publikacji (bot czyta z treści tylko `Odpowiedzialny:` i `Termin:`), więc publikację ustawia się w nich kartą, komendą lub stroną.
@@ -87,7 +87,10 @@ Zadania na dalszych etapach zostają tam, gdzie są.
 ## Rozliczenia z osobami piszącymi (tylko zarząd)
 
 **Co to robi.** Każda osoba ma stałą stawkę za tekst. Tekst liczy się do miesiąca, w którym został **oddany do redakcji**, czyli przeszedł do statusu „Do redakcji”
-(przyciskiem na karcie, na stronie albo ręczną zmianą tagu: bot zapisuje wtedy datę oddania; jeśli tekst wróci do pisania, data znika i zapisze się nowa przy kolejnym oddaniu).
+(przyciskiem na karcie, na stronie albo ręczną zmianą tagu). Liczy się **pierwsze** oddanie: powrót do pisania na poprawki, ponowne oddanie i publikacja nie zmieniają tej daty.
+Jeśli bot nie zobaczył zmiany (był wyłączony, np. przy redeployu), zapisze datę przy najbliższym przeglądzie forum (żywa tablica robi go co najwyżej co 10 minut), czyli z dniem wykrycia.
+**Ważne dla redakcji:** autor po oddaniu tekstu przesuwa kartę do **Do redakcji**. Jeśli karta pójdzie z „W pisaniu” od razu do „Do publikacji” lub „Opublikowane”, datą oddania będzie dzień tej zmiany, czyli zwykle dzień publikacji.
+Taką datę poprawisz w poście z zadaniem: `/rozliczenia oddano data:28.10` (`data:brak` usuwa datę). Daty tekstu z zatwierdzonego protokołu zmienić się nie da.
 Pierwszego dnia roboczego następnego miesiąca, od godziny podsumowania (`DIGEST_HOUR`), bot przygotowuje szkic protokołów za poprzedni miesiąc i wysyła **Tobie** w wiadomości prywatnej.
 Dopiero po Twoim zatwierdzeniu każda osoba dostaje swój protokół (PDF) w wiadomości prywatnej z prośbą, żeby sprawdziła zestawienie, dopisała liczbę godzin, podpisała i odesłała e-mailem.
 
@@ -112,7 +115,8 @@ Opcjonalnie `PROTOCOL_ISSUER` (nazwa zleceniodawcy na protokole, domyślnie `Gam
 4. **Zatwierdzenie:** **Wyślij do osób**, potem potwierdzenie („Tak, wyślij”). Przed wysyłką bot sprawdza jeszcze raz, czy nic się nie zmieniło od szkicu (nowy tekst, premia, stawka, zmiana statusu): jeśli tak,
    nic nie wysyła i pokazuje nowy szkic do ponownego zatwierdzenia. Po wysyłce dane są **zamrożone**: teksty i premie z protokołu nie wejdą do żadnego następnego i nie zmienisz ich wstecz.
    Osobom, do których wiadomość nie dotarła (mają wyłączone wiadomości prywatne od członków serwera), bot pokaże listę i przycisk **Ponów wysyłkę**.
-5. **Uzupełnienie:** teksty, które zostały poza protokołem (np. osobie brakowało stawki), rozliczysz później: `/rozliczenia szkic miesiac:2026-10` po wysłaniu tworzy protokół uzupełniający tylko z tego, co zostało. „Pomiń ten miesiąc” zamyka szkic bez rozliczania.
+5. **Zła data oddania:** w poście z zadaniem `/rozliczenia oddano data:28.10` (także `28.10.2026` albo `2026-10-28`). Bot odpowie, za który miesiąc tekst się teraz rozliczy, i podpowie, czy trzeba odświeżyć szkic albo zrobić protokół uzupełniający.
+6. **Uzupełnienie:** teksty, które zostały poza protokołem (np. osobie brakowało stawki), rozliczysz później: `/rozliczenia szkic miesiac:2026-10` po wysłaniu tworzy protokół uzupełniający tylko z tego, co zostało. „Pomiń ten miesiąc” zamyka szkic bez rozliczania.
 
 **Pierwszy miesiąc.** Teksty oddane przed wdrożeniem nie mają daty oddania. Szkic pokaże je w menu „Zaznacz teksty oddane w: …” (tylko posty założone w tym lub poprzednim miesiącu, żeby nie wracały stare opublikowane teksty);
 zaznaczasz te, które faktycznie oddano w rozliczanym miesiącu, a szkic odświeża się sam.

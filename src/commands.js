@@ -56,6 +56,10 @@ function buildCommands() {
         .setDescription('Ustaw stałą kwotę premii za udostępnienie tekstu na social mediach (tik na karcie zadania)')
         .addStringOption((o) => o.setName('kwota').setDescription('Kwota premii, np. 20 albo 20,50; „brak” usuwa kwotę i wyłącza zatwierdzanie premii').setRequired(true).setMaxLength(20)))
       .addSubcommand((c) => c
+        .setName('oddano')
+        .setDescription('Popraw datę oddania tekstu, od niej zależy miesiąc rozliczenia (użyj w poście z zadaniem)')
+        .addStringOption((o) => o.setName('data').setDescription('Data oddania: 28.10, 28.10.2026 lub 2026-10-28; „brak” usuwa datę').setRequired(true).setMaxLength(10)))
+      .addSubcommand((c) => c
         .setName('szkic')
         .setDescription('Przygotuj szkic protokołów za miesiąc i wyślij go do mnie w wiadomości prywatnej')
         .addStringOption((o) => o.setName('miesiac').setDescription('Miesiąc, np. 2026-10 albo 10.2026 (puste = poprzedni)').setMaxLength(10)))),

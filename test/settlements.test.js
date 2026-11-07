@@ -135,7 +135,7 @@ test('/rozliczenia stawka i stawki: zapis, imię do protokołu, usuwanie, zły f
 
 // ---------------------------------------------------------------- data oddania do redakcji
 
-test('data oddania: zapisuje się przy przejściu do „Do redakcji”, znika przy powrocie do pisania, ręczna zmiana tagu też się liczy', async () => {
+test('data oddania: zapisuje się przy pierwszym przejściu do „Do redakcji”, powrót do pisania i ponowne oddanie jej nie zmieniają, ręczna zmiana tagu też się liczy', async () => {
   let manual;
   const t = await setup({ seed: (fake) => { manual = fake.addThread({ name: 'Ręcznie', owner: ID.oliwia, status: 'W pisaniu' }); } });
   try {
@@ -143,16 +143,17 @@ test('data oddania: zapisuje się przy przejściu do „Do redakcji”, znika pr
     assert.equal(metaOf(t, th.id), undefined);
     await t.handIn(th);
     assert.equal(metaOf(t, th.id).h, '2026-10-26');
-    // powrót do pisania kasuje datę, kolejne oddanie zapisuje nową
+    // powrót do pisania (poprawki) i ponowne oddanie nie zmieniają daty: liczy się pierwsze oddanie
     await t.fake.component(ID.oliwia, th.id, 'kb:go:W pisaniu', { type: 2 });
-    assert.equal(metaOf(t, th.id).h, undefined, 'cofnięty tekst nie ma daty oddania');
-    t.setNow('2026-10-28T10:00:00Z');
+    assert.equal(metaOf(t, th.id).h, '2026-10-26', 'cofnięty do poprawek tekst zachowuje datę oddania');
+    t.setNow('2026-11-03T10:00:00Z');
     await t.handIn(th);
-    assert.equal(metaOf(t, th.id).h, '2026-10-28');
-    // dalsze statusy po oddaniu nie zmieniają daty
-    t.setNow('2026-10-30T10:00:00Z');
+    assert.equal(metaOf(t, th.id).h, '2026-10-26', 'ponowne oddanie po poprawkach nie przesuwa tekstu do następnego miesiąca');
+    // dalsze statusy po oddaniu (aż do publikacji) nie zmieniają daty
+    t.setNow('2026-11-04T10:00:00Z');
     await t.fake.component(ID.szef, th.id, 'kb:go:Do publikacji', { type: 2 });
-    assert.equal(metaOf(t, th.id).h, '2026-10-28');
+    await t.fake.component(ID.szef, th.id, 'kb:go:Opublikowane', { type: 2 });
+    assert.equal(metaOf(t, th.id).h, '2026-10-26');
     // ręczna zmiana tagu w Discordzie (bez bota): z pisania do redakcji
     t.setNow('2026-10-29T10:00:00Z');
     manual.applied_tags = [tagId('Do redakcji')];
@@ -170,8 +171,82 @@ test('data oddania: zapisuje się przy przejściu do „Do redakcji”, znika pr
     await t.handIn(quiet);
     assert.equal(metaOf(t, quiet.id).h, '2026-10-31', 'data oddania bez zdarzenia THREAD_UPDATE');
     await t.fake.component(ID.oliwia, quiet.id, 'kb:go:W pisaniu', { type: 2 });
-    assert.equal(metaOf(t, quiet.id).h, undefined, 'powrót do pisania bez zdarzenia THREAD_UPDATE');
+    assert.equal(metaOf(t, quiet.id).h, '2026-10-31', 'powrót do pisania bez zdarzenia THREAD_UPDATE też zachowuje datę');
     t.fake.muteThreadUpdates = false;
+  } finally { await t.close(); }
+});
+
+// Zebranie forum tak, jak robi to żywa tablica, strona i podsumowanie dnia.
+async function collect(t) {
+  const forum = await t.bot.getForum();
+  return t.bot.collectTasks(forum, require('../src/board').statusTags(forum.availableTags));
+}
+
+test('data oddania bez zdarzenia (bot wyłączony, post spoza pamięci): przegląd forum zapisuje dzień wykrycia, a stare teksty przy pierwszym przeglądzie nie dostają daty', async () => {
+  const t = await setup();
+  try {
+    const old = t.fake.addThread({ name: 'Opublikowany dawno', owner: ID.oliwia, status: 'Opublikowane' });
+    const waiting = t.fake.addThread({ name: 'Już w redakcji', owner: ID.oliwia, status: 'Do redakcji' });
+    const missed = t.fake.addThread({ name: 'Przeoczony', owner: ID.oliwia, status: 'W pisaniu' });
+    await collect(t); // pierwszy przegląd po wdrożeniu: tylko zapamiętuje statusy
+    assert.equal(metaOf(t, old.id)?.h, undefined, 'stary tekst nie dostaje daty „dzisiaj”');
+    assert.equal(metaOf(t, waiting.id)?.h, undefined, 'tekst oddany przed wdrożeniem zostaje „bez daty” (do menu na szkicu albo /rozliczenia oddano)');
+    // tag zmieniony, gdy bot nie działał: bez żadnego zdarzenia
+    t.setNow('2026-10-28T10:00:00Z');
+    missed.applied_tags = [tagId('Do redakcji')];
+    await collect(t);
+    assert.equal(metaOf(t, missed.id).h, '2026-10-28', 'przegląd zapisał datę oddania');
+    // kolejne przeglądy i zmiany niczego nie przesuwają
+    t.setNow('2026-11-05T10:00:00Z');
+    missed.applied_tags = [tagId('Opublikowane')];
+    await collect(t);
+    assert.equal(metaOf(t, missed.id).h, '2026-10-28');
+    // bez rozliczeń przegląd nic nie zapisuje
+    const off = await setup({ env: { FINANCE_USER_IDS: '' } });
+    try {
+      off.fake.addThread({ name: 'Cokolwiek', owner: ID.oliwia, status: 'Do redakcji' });
+      await collect(off);
+      assert.equal(stateOf(off).seen, undefined);
+    } finally { await off.close(); }
+  } finally { await t.close(); }
+});
+
+test('/rozliczenia oddano: zarząd poprawia datę oddania, tekst przechodzi do właściwego miesiąca; rozliczonego nie da się zmienić', async () => {
+  const t = await setup();
+  try {
+    await t.rate(ID.oliwia, '150', 'Oliwia Nowak');
+    // tekst przeniesiony od razu z pisania do publikacji 4 listopada, choć oddany 28 października
+    const th = t.fake.addThread({ name: 'Recenzja na skróty', owner: ID.oliwia, status: 'W pisaniu' });
+    t.setNow('2026-11-04T10:00:00Z');
+    await t.fake.component(ID.szef, th.id, 'kb:go:Do publikacji', { type: 2 });
+    assert.equal(metaOf(t, th.id).h, '2026-11-04');
+    const ev = await t.rozl(ID.szef, 'oddano', [opt('data', '28.10')], th.id);
+    assert.equal(ev[0].data.flags, EPHEMERAL);
+    assert.match(textOf(ev), /Data oddania: 28\.10\.2026 \(było 04\.11\.2026\)\. Tekst rozliczy się za październik 2026\./);
+    assert.equal(metaOf(t, th.id).h, '2026-10-28');
+    // tylko zarząd, tylko w poście, poprawna data, nie z przyszłości
+    assert.match(textOf(await t.rozl(ID.oliwia, 'oddano', [opt('data', '28.10')], th.id)), /tylko dla zarządu/);
+    assert.match(textOf(await t.rozl(ID.szef, 'oddano', [opt('data', '28.10')], ID.ogolne)), /działają tylko w postach na forum/);
+    assert.match(textOf(await t.rozl(ID.szef, 'oddano', [opt('data', 'wczoraj')], th.id)), /Nie rozumiem daty/);
+    assert.match(textOf(await t.rozl(ID.szef, 'oddano', [opt('data', '2026-12-01')], th.id)), /nie może być z przyszłości/);
+    assert.equal(metaOf(t, th.id).h, '2026-10-28', 'błędne wywołania niczego nie zmieniają');
+    // ostrzeżenie dla tekstu, który jeszcze się pisze
+    const writing = t.fake.addThread({ name: 'Jeszcze pisany', owner: ID.oliwia, status: 'W pisaniu' });
+    assert.match(textOf(await t.rozl(ID.szef, 'oddano', [opt('data', '2026-11-02')], writing.id)), /status „W pisaniu”/);
+    // „brak” usuwa datę
+    assert.match(textOf(await t.rozl(ID.szef, 'oddano', [opt('data', 'brak')], writing.id)), /Usunięto datę oddania/);
+    assert.equal(metaOf(t, writing.id)?.h, undefined);
+    // tekst trafia do szkicu za październik
+    const made = await t.rozl(ID.szef, 'szkic', [opt('miesiac', '2026-10')]);
+    assert.match(textOf(made), /Szkic rozliczenia za październik 2026/);
+    const draft = await waitFor(() => t.draftMsg());
+    assert.match(plain(draft.content), /Oliwia Nowak.*1 tekst/);
+    // po zatwierdzeniu daty nie da się zmienić
+    await t.press('kb:fin:send:2026-10');
+    await t.press('kb:fin:yes:2026-10');
+    await waitFor(() => metaOf(t, th.id).s);
+    assert.match(textOf(await t.rozl(ID.szef, 'oddano', [opt('data', '01.11')], th.id)), /już rozliczony w protokole za październik 2026/);
+    assert.equal(metaOf(t, th.id).h, '2026-10-28');
   } finally { await t.close(); }
 });
 

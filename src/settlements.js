@@ -80,16 +80,64 @@ function createSettlements({
   const assertFinance = (userId) => { assertEnabled(); if (!isFinance(userId)) throw new UserError(FIN_ONLY_MSG, undefined, 403); };
 
   // ------------------------------------------------------------ data oddania tekstu do redakcji
-  // Zapisujemy ją przy przejściu do „Do redakcji” (lub dalej) i kasujemy przy powrocie do pisania, o ile tekst nie jest jeszcze rozliczony.
-  // Wywoływane po zmianie statusu z karty, strony i ręcznej zmianie tagu w Discordzie; powtórne wywołanie niczego nie psuje.
+  // Zapisujemy PIERWSZE oddanie: przejście do „Do redakcji” (lub dalej). Powrót do pisania (poprawki) i ponowne oddanie nie zmieniają daty,
+  // bo tekst rozlicza się w miesiącu, w którym autor go oddał, a nie w miesiącu poprawek czy publikacji. Datę poprawia zarząd: /rozliczenia oddano.
+  // Wywoływane po zmianie statusu z karty, strony, ręcznej zmianie tagu w Discordzie i przy przeglądzie forum; powtórne wywołanie niczego nie psuje.
   function noteStatusChange(threadId, before, after) {
-    const wasDone = B.isWritingDone(before);
-    const isDone = B.isWritingDone(after);
-    if (wasDone === isDone) return;
+    if (B.isWritingDone(before) || !B.isWritingDone(after)) return;
     const m = metaOf(threadId) || {};
-    if (m.s) return;
-    if (isDone) patchMeta(threadId, { h: today() });
-    else if (m.h) patchMeta(threadId, { h: null });
+    if (m.s || m.h) return;
+    patchMeta(threadId, { h: today() });
+  }
+
+  // Przegląd statusów przy każdym zebraniu forum (żywa tablica co najwyżej co 10 minut, strona, podsumowanie dnia).
+  // Łapie oddania, których bot nie zobaczył jako zdarzenia: bot był wyłączony (redeploy) albo ktoś zmienił tag w poście,
+  // którego discord.js nie miał w pamięci (np. po restarcie). Datą jest wtedy dzień wykrycia. Post widziany pierwszy raz
+  // tylko zapamiętujemy, bez daty, żeby po wdrożeniu stare teksty nie dostały daty „dzisiaj”.
+  function syncStatuses(tasks, { complete = false } = {}) {
+    if (!enabled) return;
+    const before = store.get('seen') || {};
+    const seen = complete ? {} : { ...before };
+    let changed = complete && Object.keys(before).length !== tasks.length;
+    for (const t of tasks) {
+      const prev = before[t.id];
+      if (prev !== undefined && prev !== t.status) noteStatusChange(t.id, prev, t.status);
+      if (prev !== t.status) changed = true;
+      seen[t.id] = t.status;
+    }
+    if (changed) store.set('seen', seen);
+  }
+
+  // /rozliczenia oddano: ręczna poprawka daty oddania tekstu (w poście z zadaniem). „brak” usuwa datę (tekst wróci do menu „bez daty”).
+  async function cmdOddano(interaction) {
+    const raw = interaction.options.getString('data', true).trim();
+    const remove = REMOVE_WORDS.test(raw);
+    const day = today();
+    const date = remove ? null : B.normalizeDate(raw, day, { nearest: true });
+    if (!remove && !date) throw new UserError('Nie rozumiem daty. Wpisz np. 28.10, 28.10.2026 albo 2026-10-28 (albo „brak”, żeby usunąć datę oddania).');
+    if (date && date > day) throw new UserError('Data oddania nie może być z przyszłości.');
+    let reply = '';
+    await onTask(interaction, async ({ thread, st }) => {
+      const m = metaOf(thread.id) || {};
+      if (m.s) throw new UserError(`Ten tekst jest już rozliczony w protokole za ${F.monthLabel(m.s)}, więc jego daty oddania nie można zmienić.`);
+      if (remove) {
+        if (!m.h) throw new UserError('Ten tekst nie ma zapisanej daty oddania.');
+        patchMeta(thread.id, { h: null });
+        reply = 'Usunięto datę oddania. Jeśli tekst jest już oddany, szkic pokaże go w menu „Zaznacz teksty oddane w: …”.';
+        return;
+      }
+      patchMeta(thread.id, { h: date });
+      const cur = await resolveTask(thread, st, day);
+      const month = F.monthOf(date);
+      const parts = [`Data oddania: ${B.fmtDate(date)}${m.h && m.h !== date ? ` (było ${B.fmtDate(m.h)})` : ''}. Tekst rozliczy się za ${F.monthLabel(month)}.`];
+      if (!B.isWritingDone(cur.status)) parts.push(`Uwaga: zadanie ma status „${cur.status}”, więc wejdzie do rozliczenia dopiero po przejściu do „Do redakcji” lub dalej.`);
+      if (!cur.assigneeId) parts.push('Uwaga: zadanie nie ma osoby, więc tekst nie wejdzie do protokołu, dopóki ktoś nie zostanie przypisany.');
+      const latest = latestRecord(month);
+      if (latest && latest.rec.state === 'draft') parts.push('Szkic tego miesiąca już istnieje: odśwież go przyciskiem przed zatwierdzeniem.');
+      else if (latest) parts.push(`Protokół za ten miesiąc jest już zamknięty: rozliczysz ten tekst protokołem uzupełniającym (/rozliczenia szkic miesiac:${month}).`);
+      reply = parts.join(' ');
+    });
+    await interaction.editReply({ content: reply, allowedMentions: NO_MENTIONS });
   }
 
 
@@ -607,6 +655,7 @@ function createSettlements({
     if (sub === 'premia') return cmdPremia(interaction);
     if (sub === 'social') return cmdSocial(interaction);
     if (sub === 'szkic') return cmdSzkic(interaction);
+    if (sub === 'oddano') return cmdOddano(interaction);
     throw new UserError('Nie znam tej komendy. Odśwież Discorda (Ctrl+R) i spróbuj ponownie.');
   }
 
@@ -702,7 +751,7 @@ function createSettlements({
   }
 
   return {
-    enabled, isFinance, command, onComponent, financeTick, noteStatusChange, socialState, setSocial,
+    enabled, isFinance, command, onComponent, financeTick, noteStatusChange, syncStatuses, socialState, setSocial,
   };
 }
 

@@ -34,6 +34,7 @@ test('rejestracja: /rozliczenia ma podkomendy i opcje, których używają przyci
       stawki: [],
       premia: ['kwota:3!', 'opis:3'],
       social: ['kwota:3!'],
+      oddano: ['data:3!'],
       szkic: ['miesiac:3'],
     });
     assert.ok(cmd.options.every((sc) => sc.type === 1), 'same podkomendy');

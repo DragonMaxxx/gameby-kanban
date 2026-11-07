@@ -287,6 +287,13 @@ function createBot({ client, config, store, now = () => new Date(), log = consol
       }));
       for (const t of batch) { if (!t.ok) partial = true; tasks.push(t); }
     }
+    // Rozliczenia: oddania, których bot nie zobaczył jako zdarzenia (redeploy, ręczna zmiana tagu w poście spoza pamięci discord.js).
+    // Błąd tutaj nie może zepsuć tablicy.
+    try {
+      settlements.syncStatuses(tasks, { complete: !truncated && !archiveFailed });
+    } catch (err) {
+      log.error(`Rozliczenia, przegląd statusów: ${err.message}`);
+    }
     const notes = [];
     if (truncated) notes.push(`Bot sprawdził ${ARCHIVE_MAX_PAGES * ARCHIVE_PAGE} najnowszych zarchiwizowanych postów, starszych nie widać.`);
     if (archiveFailed) notes.push('Nie udało się pobrać zarchiwizowanych postów.');

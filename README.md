@@ -92,7 +92,7 @@ Bot zapisuje też dzień faktycznego przekazania do redakcji (pierwsze przejści
 zadanie **nie ma terminu** (wtedy decyduje miesiąc przekazania) albo tekst się **spóźnił** i przekazano go już po zamknięciu protokołu za miesiąc terminu. Wtedy wchodzi do miesiąca przekazania i nie przepada.
 W PDF kolumna „Termin” pokazuje termin oddania (bez terminu: dzień przekazania). Dzień przekazania poprawisz w poście `/rozliczenia oddano data:28.10` (`data:brak` usuwa).
 Pierwszego dnia roboczego następnego miesiąca, od godziny podsumowania (`DIGEST_HOUR`), bot przygotowuje szkic protokołów za poprzedni miesiąc i wysyła **Tobie** w wiadomości prywatnej.
-Dopiero po Twoim zatwierdzeniu każda osoba dostaje swój protokół (PDF) w wiadomości prywatnej z prośbą, żeby sprawdziła zestawienie, dopisała liczbę godzin, podpisała i odesłała e-mailem.
+Dopiero po Twoim zatwierdzeniu każda osoba dostaje swój protokół (PDF) w wiadomości prywatnej z prośbą, żeby sprawdziła zestawienie, podpisała i odesłała e-mailem. Godziny bot wpisuje sam: **2 godziny za każdy tekst** (premie godzin nie dodają; stała `HOURS_PER_TEXT` w `src/finance.js`).
 
 **Włączenie.** W `.env` (na Railway w zakładce Variables) ustaw `FINANCE_USER_IDS`: numery osób z zarządu, oddzielone przecinkami
 (numer: Discord, Ustawienia, Zaawansowane, Tryb dewelopera włączony, potem prawy przycisk na osobie, „Kopiuj ID użytkownika”).
@@ -125,7 +125,7 @@ zaznaczasz te, które faktycznie oddano w rozliczanym miesiącu, a szkic odświe
 Wyjątek to sam stan premii za social (brak, zgłoszona, zatwierdzona): widać go na karcie, na kartach i w oknie zadania na stronie, ale nigdy z kwotą. Żywy nagłówek tablicy w Discordzie go nie pokazuje.
 Osoba widzi wyłącznie swój protokół, dopiero po zatwierdzeniu. Uwaga: stawki i kwoty leżą w pliku stanu (`state.json`), więc widzi je każdy, kto ma dostęp do wolumenu bota lub projektu na Railway.
 
-**Co jest w PDF.** Tytuł i miesiąc, zleceniodawca, imię i nazwisko osoby, tabela tekstów (tytuł, data oddania, stawka, kwota), premie, suma „Razem do wypłaty”, pole na liczbę przepracowanych godzin, pole na uwagi i miejsca na dwa podpisy.
+**Co jest w PDF.** Tytuł i miesiąc, zleceniodawca, imię i nazwisko osoby, tabela tekstów (tytuł, termin, godziny, stawka, kwota), premie, suma „Razem do wypłaty”, liczba godzin pracy (2 za tekst, wpisana przez bota), pole na uwagi i miejsca na dwa podpisy.
 Suma, godziny i podpis są zawsze na jednej stronie. **Treść to roboczy szablon, nie wzór sprawdzony przez księgową ani prawnika:** bot nie wie, czy rozliczacie się umową zlecenia, o dzieło czy fakturą, i nie liczy podatków ani składek. Pokaż protokół księgowej przed pierwszą wysyłką
 i daj mi znać, co zmienić (albo przyślij własny wzór), a dopasuję układ i brzmienie.
 

@@ -363,7 +363,7 @@ test('zatwierdzenie: potwierdzenie, wysyłka PDF do osób, zamrożenie danych, d
     assert.ok(got, 'Oliwia dostała wiadomość prywatną');
     const content = plain(got.content);
     assert.match(content, /protokół rozliczenia za październik 2026 \(GameBy\.pl\)/);
-    assert.match(content, /dopisz liczbę przepracowanych godzin, podpisz i odeślij na adres rozliczenia@gameby\.pl/);
+    assert.match(content, /sprawdź zestawienie tekstów, kwot i godzin \(4 godziny, po 2 godziny za tekst\), podpisz i odeślij na adres rozliczenia@gameby\.pl/);
     assert.match(content, /Razem do wypłaty: 320,00 zł/);
     assert.match(content, new RegExp(`napisz do <@${ID.szef}>`));
     assert.deepEqual(got.allowed_mentions, { parse: [] }, 'wiadomość nie pinguje');

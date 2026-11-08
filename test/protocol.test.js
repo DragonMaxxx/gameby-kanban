@@ -66,3 +66,23 @@ test('renderProtocol: suma i podpis są zawsze na tej samej stronie (także gdy 
   }
   assert.equal(checked, 11, 'w każdym protokole suma jest na dokładnie jednej stronie');
 });
+
+test('PDF: godziny wpisane przez bota, 2 za tekst, bez pustego pola do uzupełnienia', async () => {
+  const { execFileSync } = require('node:child_process');
+  const fs = require('node:fs');
+  const os = require('node:os');
+  const path = require('node:path');
+  const texts = [1, 2, 3].map((n) => ({ id: String(n), title: `Tekst ${n}`, url: '', date: `2026-10-0${n}`, rate: 15000, amount: 15000 }));
+  const buf = await renderProtocol({
+    month: '2026-10', issuer: 'GameBy.pl', returnEmail: 'r@gameby.pl', preparedAt: '2026-11-02',
+    person: { name: 'Oliwia Nowak', rate: 15000, texts, bonuses: [], textsTotal: 45000, bonusTotal: 0, total: 45000, hours: 6 },
+  });
+  const file = path.join(os.tmpdir(), `godziny-${process.pid}.pdf`);
+  fs.writeFileSync(file, buf);
+  let text;
+  try { text = execFileSync('pdftotext', ['-layout', file, '-'], { encoding: 'utf8' }); } catch { return; } finally { fs.rmSync(file, { force: true }); }
+  assert.match(text, /Liczba godzin pracy w miesiącu: 6 godzin \(2 godziny za każdy tekst\)/);
+  assert.match(text, /Za każdy tekst liczymy 2 godziny pracy/);
+  assert.doesNotMatch(text, /uzupełnia osoba rozliczana|dopisanie liczby godzin/);
+  assert.match(text, /Godz\./);
+});

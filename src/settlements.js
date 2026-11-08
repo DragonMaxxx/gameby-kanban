@@ -374,7 +374,7 @@ function createSettlements({
       lines.push(...failed.map((p) => `• ${B.esc(p.name)} (<@${p.userId}>): ${dmReason((rec.delivery || {})[p.userId] || {})}`));
       lines.push('Poproś te osoby o włączenie wiadomości prywatnych od członków serwera i ponów wysyłkę przyciskiem. PDF możesz też przesłać im sam, plik masz w szkicu powyżej.');
     } else {
-      lines.push('Każda osoba dostała swój protokół z prośbą o sprawdzenie, dopisanie godzin, podpis i odesłanie e-mailem.');
+      lines.push(`Każda osoba dostała swój protokół (godziny wpisane: ${F.formatHours(F.HOURS_PER_TEXT)} za tekst) z prośbą o sprawdzenie, podpis i odesłanie e-mailem.`);
     }
     const components = failed.length
       ? [new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId(`kb:fin:retry:${key}`).setLabel(`Ponów wysyłkę (${failed.length})`).setStyle(ButtonStyle.Primary))]
@@ -402,7 +402,7 @@ function createSettlements({
   function personText(rec, person, approverId) {
     const lines = [
       `Cześć! W załączniku protokół rozliczenia za ${rec.report.label} (${cfg.issuer}).`,
-      'Proszę: sprawdź zestawienie tekstów i kwot, dopisz liczbę przepracowanych godzin, podpisz i odeślij'
+      `Proszę: sprawdź zestawienie tekstów, kwot i godzin (${F.formatHours(person.hours ?? person.texts.length * F.HOURS_PER_TEXT)}, po ${F.formatHours(F.HOURS_PER_TEXT)} za tekst), podpisz i odeślij`
         + (cfg.returnEmail ? ` na adres ${cfg.returnEmail}.` : ' do redakcji.'),
       `Razem do wypłaty: ${F.formatMoney(person.total)}.`,
       `Jeśli coś się nie zgadza, napisz do <@${approverId}> przed podpisaniem.`,

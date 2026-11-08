@@ -338,3 +338,17 @@ test('buildReport: premie nierozliczonego tekstu idą razem z tekstem, nawet gdy
   const nov = F.buildReport({ month: '2026-11', tasks, people, start: '2026-09' });
   assert.deepEqual(nov.persons[0].bonuses.map((x) => x.bid).sort(), ['c1', 'd1']);
 });
+
+test('godziny: 2 za każdy rozliczony tekst, premie nie dodają godzin; odmiana słowa „godzina”', () => {
+  assert.equal(F.HOURS_PER_TEXT, 2);
+  const people = { u1: { name: 'Oliwia', rate: 15000 } };
+  const tasks = [
+    T('1', 'A', { bonuses: [{ i: 'x', a: 2000, n: 'social', m: '2026-10' }] }),
+    T('2', 'B'),
+    T('3', 'C', { handedIn: '2026-11-02' }), // inny miesiąc: nie liczy się
+  ];
+  const r = F.buildReport({ month: '2026-10', tasks, people });
+  assert.equal(r.persons[0].texts.length, 2);
+  assert.equal(r.persons[0].hours, 4);
+  assert.deepEqual([1, 2, 4, 5, 12, 22, 25].map(F.formatHours), ['1 godzina', '2 godziny', '4 godziny', '5 godzin', '12 godzin', '22 godziny', '25 godzin']);
+});

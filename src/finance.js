@@ -4,6 +4,9 @@
 // Czysta logika, bez Discorda i dysku, żeby dało się ją sprawdzić testami jednostkowymi.
 const { isWritingDone } = require('./board');
 
+// Godziny w protokole: stałe 2 godziny za każdy rozliczony tekst (premie nie dodają godzin). Więcej za tekst wpisać nie wolno,
+// więc protokół podaje liczbę sam, zamiast prosić osobę o dopisanie.
+const HOURS_PER_TEXT = 2;
 const MAX_GROSZE = 10_000_000; // 100 000,00 zł: górna granica rozsądku, żeby literówka nie zrobiła z 120 zł milionów
 
 // ---------------------------------------------------------------- kwoty
@@ -21,6 +24,14 @@ function formatMoney(grosze) {
   const g = Math.round(Number(grosze) || 0);
   const zl = String(Math.floor(g / 100)).replace(/\B(?=(\d{3})+(?!\d))/g, '\u00a0');
   return `${zl},${String(g % 100).padStart(2, '0')}\u00a0zł`;
+}
+
+// 2 -> „2 godziny”, 5 -> „5 godzin”, 1 -> „1 godzina”.
+function formatHours(n) {
+  const a = n % 100;
+  const b = n % 10;
+  const word = n === 1 ? 'godzina' : (b >= 2 && b <= 4 && !(a >= 12 && a <= 14) ? 'godziny' : 'godzin');
+  return `${n} ${word}`;
 }
 
 // ---------------------------------------------------------------- miesiące
@@ -160,7 +171,10 @@ function buildReport({ month, tasks, people = {}, start = null, closed = {} }) {
     const lines = p.texts.map((x) => ({ ...x, rate: info.rate, amount: info.rate }));
     const textsTotal = lines.reduce((s, x) => s + x.amount, 0);
     const bonusTotal = p.bonuses.reduce((s, x) => s + x.amount, 0);
-    persons.push({ userId: p.userId, name: info.name, rate: info.rate, texts: lines, bonuses: p.bonuses, textsTotal, bonusTotal, total: textsTotal + bonusTotal });
+    persons.push({
+      userId: p.userId, name: info.name, rate: info.rate, texts: lines, bonuses: p.bonuses, textsTotal, bonusTotal, total: textsTotal + bonusTotal,
+      hours: lines.length * HOURS_PER_TEXT,
+    });
     for (const x of lines) settle.texts.push(x.id);
     for (const x of p.bonuses) settle.bonuses.push({ id: x.id, bid: x.bid });
   }
@@ -197,7 +211,7 @@ function safeFileName(text) {
 }
 
 module.exports = {
-  parseMoney, formatMoney, MAX_GROSZE,
+  parseMoney, formatMoney, MAX_GROSZE, HOURS_PER_TEXT, formatHours,
   isMonthKey, monthOf, monthLabel, prevMonth, nextMonth, lastDayOf, firstWorkdayOf, normalizeMonth, monthToPrepare, bonusMonthFor, textMonthFor,
   buildReport, reportSignature, safeFileName,
 };

@@ -3,7 +3,7 @@
 // Protokół rozliczenia jednej osoby jako PDF (A4). Czcionka DejaVu Sans jest dołączona, bo wbudowane czcionki PDF nie mają polskich znaków.
 const path = require('node:path');
 const PDFDocument = require('pdfkit');
-const { formatMoney, monthLabel, lastDayOf } = require('./finance');
+const { formatMoney, formatHours, monthLabel, lastDayOf, HOURS_PER_TEXT } = require('./finance');
 
 const FONT = path.join(__dirname, 'fonts', 'DejaVuSans.ttf');
 const FONT_BOLD = path.join(__dirname, 'fonts', 'DejaVuSans-Bold.ttf');
@@ -18,7 +18,7 @@ const plDate = (iso) => {
   return m ? `${m[3]}.${m[2]}.${m[1]}` : '';
 };
 
-// data: { month, issuer, returnEmail, title, preparedAt, person: {name, rate, texts[], bonuses[], textsTotal, bonusTotal, total} }
+// data: { month, issuer, returnEmail, title, preparedAt, person: {name, rate, texts[], bonuses[], textsTotal, bonusTotal, total, hours} }
 function renderProtocol(data) {
   return new Promise((resolve, reject) => {
     const { month, person } = data;
@@ -70,7 +70,9 @@ function renderProtocol(data) {
       doc.moveDown(0.8);
 
       doc.font('Sans').fontSize(9.5).fillColor(INK).text(
-        'Poniżej zestawienie tekstów z terminem oddania w wymienionym miesiącu (tekst bez terminu liczy się według dnia przekazania do redakcji). Prosimy o sprawdzenie, czy jest kompletne i zgodne z Twoją wiedzą, dopisanie liczby godzin (jeśli dotyczy), podpisanie i odesłanie'
+        'Poniżej zestawienie tekstów z terminem oddania w wymienionym miesiącu (tekst bez terminu liczy się według dnia przekazania do redakcji). '
+        + `Za każdy tekst liczymy ${formatHours(HOURS_PER_TEXT)} pracy. `
+        + 'Prosimy o sprawdzenie, czy zestawienie jest kompletne i zgodne z Twoją wiedzą, podpisanie i odesłanie'
         + (data.returnEmail ? ` na adres ${data.returnEmail}.` : ' do redakcji.')
         + ' Jeśli czegoś brakuje lub coś się nie zgadza, napisz w uwagach albo do nas przed podpisaniem.',
         left, doc.y, { width, lineGap: 1.5 },
@@ -131,12 +133,13 @@ function renderProtocol(data) {
         'Teksty oddane do redakcji',
         [
           { label: 'Lp.', w: 30 },
-          { label: 'Tytuł tekstu', w: 245 },
+          { label: 'Tytuł tekstu', w: 205 },
           { label: 'Termin', w: 70 },
+          { label: 'Godz.', w: 40, align: 'right' },
           { label: 'Stawka', w: 75, align: 'right' },
           { label: 'Kwota', w: 75, align: 'right' },
         ],
-        person.texts.map((t, i) => [i + 1, t.title, plDate(t.date), formatMoney(t.rate), formatMoney(t.amount)]),
+        person.texts.map((t, i) => [i + 1, t.title, plDate(t.date), String(HOURS_PER_TEXT), formatMoney(t.rate), formatMoney(t.amount)]),
         'Brak tekstów z terminem w tym miesiącu.',
       );
 
@@ -186,10 +189,13 @@ function renderProtocol(data) {
         }
         doc.y += 10;
       };
-      doc.font('Sans').fontSize(9.5).fillColor(INK).text('Liczba przepracowanych godzin w miesiącu (uzupełnia osoba rozliczana):', left, doc.y, { width });
-      doc.y += 22;
-      hr(doc.y, '#888888');
-      doc.y += 14;
+      {
+        const hours = Number.isInteger(person.hours) ? person.hours : person.texts.length * HOURS_PER_TEXT;
+        doc.font('Sans').fontSize(9.5).fillColor(INK).text('Liczba godzin pracy w miesiącu: ', left, doc.y, { width, continued: true })
+          .font('Bold').text(formatHours(hours), { continued: true })
+          .font('Sans').text(` (${formatHours(HOURS_PER_TEXT)} za każdy tekst).`);
+        doc.y += 14;
+      }
       field('Uwagi (czego brakuje, co się nie zgadza):', 2);
 
       doc.y += 4;

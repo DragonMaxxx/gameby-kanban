@@ -623,10 +623,15 @@ function createSettlements({
         return;
       }
       const cur = await resolveTask(thread, st, today());
-      const month = bonusMonthOf(m);
-      list.push({ i: newBonusId(), a: amount, n: note, m: month });
+      const stored = bonusMonthOf(m);
+      list.push({ i: newBonusId(), a: amount, n: note, m: stored });
       patchMeta(thread.id, { b: list });
-      const parts = [`Dodano premię ${F.formatMoney(amount)}${note ? ` (${B.esc(note)})` : ''}. Trafi do rozliczenia za ${F.monthLabel(month)}.`];
+      // Premia oddanego, nierozliczonego tekstu idzie razem z tekstem (zasada z F.buildReport).
+      const withText = B.isWritingDone(cur.status) && !m.s
+        ? F.textMonthFor({ due: cur.due, handedIn: m.h || null, start: getFin().start || null, closed: closedMonths(), month: null })
+        : null;
+      const month = withText || stored;
+      const parts = [`Dodano premię ${F.formatMoney(amount)}${note ? ` (${B.esc(note)})` : ''}. Trafi do rozliczenia za ${F.monthLabel(month)}${withText ? ', razem z tekstem' : ''}.`];
       if (!cur.assigneeId) parts.push('Uwaga: to zadanie nie ma osoby, więc premia nie wejdzie do protokołu, dopóki ktoś nie zostanie przypisany.');
       else if (!(ratesOf()[cur.assigneeId] && ratesOf()[cur.assigneeId].rate > 0)) parts.push(`Uwaga: <@${cur.assigneeId}> nie ma ustawionej stawki, więc nie dostanie protokołu (ustaw: /rozliczenia stawka).`);
       const rec = latestRecord(month);

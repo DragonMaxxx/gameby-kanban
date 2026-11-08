@@ -136,8 +136,12 @@ function buildReport({ month, tasks, people = {}, start = null, closed = {} }) {
       // date: termin oddania (podstawa rozliczenia), handedIn: kiedy tekst faktycznie przekazano (w PDF obok terminu)
       else person(t.assigneeId).texts.push({ id: t.id, title: t.name, url: t.url, date: t.due || t.handedIn, handedIn: t.handedIn || null });
     }
+    // Premie nierozliczonego, oddanego tekstu idą RAZEM Z TEKSTEM, do miesiąca, w którym tekst się rozlicza (zapisany przy premii miesiąc
+    // mógł się zdezaktualizować: termin poprawiony później, tekst przeniesiony z opóźnieniem). Zapisany miesiąc premii (b.m) liczy się dopiero,
+    // gdy tekst jest już rozliczony (premia dodana po protokole) albo jego miesiąca nie da się ustalić.
+    const follow = handed && tm ? tm : null;
     for (const b of t.bonuses || []) {
-      if (!(b.a > 0) || b.s || b.m !== month) continue;
+      if (!(b.a > 0) || b.s || (follow || b.m) !== month) continue;
       if (!t.assigneeId) unassigned.push({ id: t.id, title: t.name, kind: 'premia' });
       else person(t.assigneeId).bonuses.push({ id: t.id, bid: b.i, title: t.name, note: b.n || '', amount: b.a });
     }

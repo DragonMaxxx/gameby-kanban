@@ -260,7 +260,7 @@ test('/rozliczenia premia: dopisuje się do tekstu, trafia do miesiąca tekstu, 
     t.setNow('2026-10-27T10:00:00Z');
     const ev = await t.rozl(ID.szef, 'premia', [opt('kwota', '20'), opt('opis', 'post na Facebooku')], a.id);
     assert.equal(ev[0].data.flags, EPHEMERAL);
-    assert.match(textOf(ev), /Dodano premię 20,00 zł \(post na Facebooku\)\. Trafi do rozliczenia za październik 2026\./);
+    assert.match(textOf(ev), /Dodano premię 20,00 zł \(post na Facebooku\)\. Trafi do rozliczenia za październik 2026, razem z tekstem\./);
     const b1 = metaOf(t, a.id).b;
     assert.equal(b1.length, 1);
     assert.deepEqual([b1[0].a, b1[0].n, b1[0].m, b1[0].s], [2000, 'post na Facebooku', '2026-10', undefined]);

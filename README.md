@@ -103,8 +103,8 @@ Opcjonalnie `PROTOCOL_ISSUER` (nazwa zleceniodawcy na protokole, domyślnie `Gam
 
 1. **Stawki:** `/rozliczenia stawka osoba:@ktoś kwota:150 imie:Imię Nazwisko`. Kwotę wpisujesz tak, jak ma stać w protokole (`150`, `150,50`; bot niczego nie przelicza na brutto ani netto). `imie` to imię i nazwisko do protokołu
    (domyślnie nazwa z serwera); przy zmianie samej kwoty imię zostaje. `/rozliczenia stawki` pokazuje wszystkie stawki (tylko Tobie), a `kwota:brak` usuwa stawkę.
-2. **Premie:** w poście z zadaniem `/rozliczenia premia kwota:20 opis:post na Facebooku`. Można dodać po publikacji i kilka do jednego tekstu. Premia trafia do miesiąca, w którym tekst oddano, jeśli jego protokół nie jest jeszcze zatwierdzony,
-   a w przeciwnym razie do bieżącego miesiąca. `kwota:brak` usuwa nierozliczone premie tego tekstu.
+2. **Premie:** w poście z zadaniem `/rozliczenia premia kwota:20 opis:post na Facebooku`. Można dodać po publikacji i kilka do jednego tekstu. Premia idzie **razem z tekstem**: dopóki tekst nie jest rozliczony, wchodzi do tego samego protokołu co on (miesiąc terminu oddania),
+   także gdy termin poprawisz później. Premia dopisana do tekstu, który jest już w zatwierdzonym protokole, trafia do bieżącego miesiąca. `kwota:brak` usuwa nierozliczone premie tego tekstu.
    **Premia za social bez komendy:** zarząd ustawia raz jedną stałą kwotę dla wszystkich (`/rozliczenia social kwota:20`, `kwota:brak` ją usuwa). Potem na karcie w poście jest przycisk **Premia za social**, a w oknie zadania na stronie pole
    „Tekst udostępniono na social mediach”. Osobę z zadania wystarczy poprosić o kliknięcie: to **zgłasza** premię (na karcie i na tablicy pojawia się „social: zgłoszone”). Zgłoszenia zatwierdzasz na szkicu w menu
    „Zatwierdź premie za social” (trafiają do rozliczanego miesiąca) albo od razu z karty lub strony przyciskiem **Zatwierdź social**; gdy sam klikniesz przycisk na karcie, premia jest zatwierdzona od razu. Zatwierdzona premia dostaje kwotę

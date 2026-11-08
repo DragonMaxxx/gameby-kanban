@@ -151,7 +151,7 @@ test('buildReport: tekst, który nie został oddany do redakcji, nie liczy się 
 test('buildReport: premie wchodzą tylko w swoim miesiącu i nie liczą się dwa razy', () => {
   const tasks = [
     T('1', 'Z premią', { bonuses: [{ i: 'a1', a: 2000, n: 'post na Facebooku', m: '2026-10', s: null }, { i: 'a2', a: 500, n: 'Instagram', m: '2026-10', s: null }] }),
-    T('2', 'Premia z listopada', { bonuses: [{ i: 'b1', a: 1000, n: 'Instagram', m: '2026-11', s: null }] }),
+    T('2', 'Premia z listopada', { handedIn: '2026-09-10', settled: '2026-09', bonuses: [{ i: 'b1', a: 1000, n: 'Instagram', m: '2026-11', s: null }] }), // tekst rozliczony wcześniej: premia w swoim miesiącu
     T('3', 'Premia rozliczona', { bonuses: [{ i: 'c1', a: 5000, n: 'stara', m: '2026-10', s: '2026-10' }] }),
     T('4', 'Premia zerowa', { bonuses: [{ i: 'd1', a: 0, n: 'nic', m: '2026-10', s: null }] }),
   ];
@@ -160,8 +160,8 @@ test('buildReport: premie wchodzą tylko w swoim miesiącu i nie liczą się dwa
   assert.equal(z.bonuses.length, 2);
   assert.deepEqual(z.bonuses.map((b) => [b.bid, b.amount, b.note]), [['a1', 2000, 'post na Facebooku'], ['a2', 500, 'Instagram']]);
   assert.equal(z.bonusTotal, 2500);
-  assert.equal(z.textsTotal, 60000); // cztery teksty po 150 zł, premia nie zmienia liczby tekstów
-  assert.equal(z.total, 62500);
+  assert.equal(z.textsTotal, 45000); // trzy nierozliczone teksty po 150 zł, premia nie zmienia liczby tekstów
+  assert.equal(z.total, 47500);
   assert.deepEqual(r.settle.bonuses, [{ id: '1', bid: 'a1' }, { id: '1', bid: 'a2' }]);
 });
 
@@ -318,4 +318,23 @@ test('buildReport: tekst wchodzi do miesiąca terminu, w PDF ma termin i dzień 
   const late = [T('1', 'Spóźniony', { due: '2026-10-28', handedIn: '2026-11-05' })];
   assert.equal(F.buildReport({ month: '2026-10', tasks: late, people, start: '2026-10', closed: { '2026-10': true } }).persons[0].texts.length, 1, 'uzupełnienie za październik nadal go widzi');
   assert.equal(F.buildReport({ month: '2026-11', tasks: late, people, start: '2026-10', closed: { '2026-10': true } }).persons[0].texts.length, 1);
+});
+
+test('buildReport: premie nierozliczonego tekstu idą razem z tekstem, nawet gdy zapisano je z innym miesiącem', () => {
+  const people = { u1: { name: 'Oliwia', rate: 15000 } };
+  const b = (i, m, extra = {}) => ({ i, a: 2000, n: 'social', m, ...extra });
+  const tasks = [
+    // termin w październiku, premie dodane w listopadzie (zapisane jako listopad): obie idą z tekstem do października
+    T('1', 'A', { due: '2026-10-28', handedIn: '2026-11-05', bonuses: [b('a1', '2026-11'), b('a2', '2026-11')] }),
+    T('2', 'B', { due: '2026-10-20', handedIn: '2026-10-19', bonuses: [b('b1', '2026-10')] }),
+    // tekst rozliczony we wrześniu, premia dopisana później: zostaje w swoim (bieżącym) miesiącu
+    T('3', 'C', { due: '2026-09-10', handedIn: '2026-09-09', settled: '2026-09', bonuses: [b('c1', '2026-11')] }),
+    // tekst jeszcze w pisaniu: premia czeka w zapisanym miesiącu
+    T('4', 'D', { status: 'W pisaniu', due: '2026-10-25', handedIn: null, bonuses: [b('d1', '2026-11')] }),
+  ];
+  const oct = F.buildReport({ month: '2026-10', tasks, people, start: '2026-09' });
+  assert.deepEqual(oct.persons[0].bonuses.map((x) => x.bid).sort(), ['a1', 'a2', 'b1']);
+  assert.equal(oct.persons[0].total, 2 * 15000 + 3 * 2000);
+  const nov = F.buildReport({ month: '2026-11', tasks, people, start: '2026-09' });
+  assert.deepEqual(nov.persons[0].bonuses.map((x) => x.bid).sort(), ['c1', 'd1']);
 });

@@ -222,7 +222,7 @@ test('/rozliczenia oddano: zarząd poprawia datę oddania, tekst przechodzi do w
     assert.equal(metaOf(t, th.id).h, '2026-11-04');
     const ev = await t.rozl(ID.szef, 'oddano', [opt('data', '28.10')], th.id);
     assert.equal(ev[0].data.flags, EPHEMERAL);
-    assert.match(textOf(ev), /Data oddania: 28\.10\.2026 \(było 04\.11\.2026\)\. Tekst rozliczy się za październik 2026\./);
+    assert.match(textOf(ev), /Data przekazania do redakcji: 28\.10\.2026 \(było 04\.11\.2026\)\. Zadanie nie ma terminu oddania, więc tekst rozliczy się za październik 2026\./);
     assert.equal(metaOf(t, th.id).h, '2026-10-28');
     // tylko zarząd, tylko w poście, poprawna data, nie z przyszłości
     assert.match(textOf(await t.rozl(ID.oliwia, 'oddano', [opt('data', '28.10')], th.id)), /tylko dla zarządu/);
@@ -234,7 +234,7 @@ test('/rozliczenia oddano: zarząd poprawia datę oddania, tekst przechodzi do w
     const writing = t.fake.addThread({ name: 'Jeszcze pisany', owner: ID.oliwia, status: 'W pisaniu' });
     assert.match(textOf(await t.rozl(ID.szef, 'oddano', [opt('data', '2026-11-02')], writing.id)), /status „W pisaniu”/);
     // „brak” usuwa datę
-    assert.match(textOf(await t.rozl(ID.szef, 'oddano', [opt('data', 'brak')], writing.id)), /Usunięto datę oddania/);
+    assert.match(textOf(await t.rozl(ID.szef, 'oddano', [opt('data', 'brak')], writing.id)), /Usunięto datę przekazania/);
     assert.equal(metaOf(t, writing.id)?.h, undefined);
     // tekst trafia do szkicu za październik
     const made = await t.rozl(ID.szef, 'szkic', [opt('miesiac', '2026-10')]);
@@ -472,7 +472,7 @@ test('teksty bez daty oddania (sprzed rozliczeń): menu na szkicu przypisuje je 
     await t.rate(ID.oliwia, '150', 'Oliwia Nowak');
     await draftForOctober(t);
     const draft = t.draftMsg();
-    assert.match(plain(draft.content), /Bez daty oddania \(tekst z czasów przed rozliczeniami\): 2/);
+    assert.match(plain(draft.content), /Bez terminu i bez daty przekazania \(np. tekst sprzed rozliczeń\): 2/);
     assert.match(plain(draft.content), /Nie ma jeszcze nic do rozliczenia z kompletnymi danymi/);
     const menu = flat(draft).find((c) => c.custom_id === 'kb:fin:dated:2026-10');
     assert.deepEqual(menu.options.map((o) => o.label), ['Stary tekst 2', 'Stary tekst 1'], 'najnowsze na górze, post z czerwca się nie pojawia');
@@ -492,7 +492,7 @@ test('teksty bez daty oddania (sprzed rozliczeń): menu na szkicu przypisuje je 
     assert.ok(fresh);
     assert.equal(metaOf(t, first).h, '2026-10-31');
     assert.match(plain(fresh.content), /Oliwia Nowak \(<@\d+>\): 1 tekst, razem 150,00 zł/);
-    assert.match(plain(fresh.content), /Bez daty oddania \(tekst z czasów przed rozliczeniami\): 1/);
+    assert.match(plain(fresh.content), /Bez terminu i bez daty przekazania \(np. tekst sprzed rozliczeń\): 1/);
     const old = t.dm(ID.szef).find((m) => m.id === draftAfterForeign.id);
     assert.match(plain(old.content), /Zastąpiony nowszym szkicem/, 'poprzedni szkic traci przyciski');
     assert.deepEqual(flat(old), []);
@@ -932,3 +932,34 @@ function socialState(t, th) {
   if (list.length) return list.some((x) => x.s) ? 'settled' : 'ok';
   return m.x ? 'claimed' : 'none';
 }
+
+test('termin oddania: tekst z terminem w październiku, przekazany 5 listopada, rozlicza się za październik; spóźniony po zamknięciu października wchodzi do listopada', async () => {
+  const t = await setup();
+  try {
+    await t.rate(ID.oliwia, '150', 'Oliwia Nowak');
+    await t.bot.financeTick(); // początek rozliczeń: październik
+    const onTime = t.fake.addThread({ name: 'Termin 28.10', owner: ID.oliwia, status: 'W pisaniu' });
+    const late = t.fake.addThread({ name: 'Termin 30.10, spóźniony', owner: ID.oliwia, status: 'W pisaniu' });
+    await t.fake.command(ID.oliwia, 'edytuj', [opt('termin', '28.10')], onTime.id);
+    await t.fake.command(ID.oliwia, 'edytuj', [opt('termin', '30.10')], late.id);
+    assert.equal(metaOf(t, onTime.id).d, '2026-10-28');
+    t.setNow('2026-11-02T10:00:00Z');
+    await t.handIn(onTime);
+    assert.equal(metaOf(t, onTime.id).h, '2026-11-02', 'dzień przekazania jest zapisany, ale nie decyduje o miesiącu');
+    await t.rozl(ID.szef, 'szkic', [opt('miesiac', '2026-10')]);
+    const draft = await waitFor(() => t.draftMsg());
+    assert.match(plain(draft.content), /Rozliczenie za październik 2026/);
+    assert.match(plain(draft.content), /Oliwia Nowak \(<@\d+>\): 1 tekst, razem 150,00 zł/);
+    await t.press('kb:fin:send:2026-10');
+    await t.press('kb:fin:yes:2026-10');
+    await waitFor(() => metaOf(t, onTime.id).s);
+    assert.equal(metaOf(t, onTime.id).s, '2026-10');
+    // spóźniony: przekazany 10 listopada, po zamknięciu października, więc trafia do listopada (nie przepada)
+    t.setNow('2026-11-10T10:00:00Z');
+    await t.handIn(late);
+    t.setNow('2026-12-01T10:00:00Z'); // wtorek
+    await t.rozl(ID.szef, 'szkic', [opt('miesiac', '2026-11')]);
+    const nov = await waitFor(() => { const d = t.draftMsg(); return d && /listopad 2026/.test(plain(d.content)) ? d : null; });
+    assert.match(plain(nov.content), /Oliwia Nowak \(<@\d+>\): 1 tekst, razem 150,00 zł/);
+  } finally { await t.close(); }
+});

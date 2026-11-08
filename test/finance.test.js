@@ -277,3 +277,45 @@ test('safeFileName: bez polskich znaków, spacji i dziwnych znaków', () => {
   assert.equal(F.safeFileName('★★★'), 'osoba');
   assert.equal(F.safeFileName(''), 'osoba');
 });
+
+// ---------------------------------------------------------------- miesiąc tekstu: wpisany termin oddania
+test('textMonthFor: liczy się miesiąc wpisanego terminu, bez terminu miesiąc przekazania, spóźniony tekst po zamknięciu miesiąca przechodzi dalej', () => {
+  const start = '2026-10';
+  // termin w październiku, przekazany 5 listopada: październik (miesiąc otwarty)
+  assert.equal(F.textMonthFor({ due: '2026-10-28', handedIn: '2026-11-05', start, month: '2026-10' }), '2026-10');
+  // termin w listopadzie, przekazany wcześniej, 30 października: listopad
+  assert.equal(F.textMonthFor({ due: '2026-11-15', handedIn: '2026-10-30', start, month: '2026-10' }), '2026-11');
+  // bez terminu: miesiąc przekazania; bez obu: null
+  assert.equal(F.textMonthFor({ due: null, handedIn: '2026-10-12', start, month: '2026-10' }), '2026-10');
+  assert.equal(F.textMonthFor({ due: null, handedIn: null, start, month: '2026-10' }), null);
+  // październik zamknięty (protokół wysłany), tekst z terminem w październiku przekazany w listopadzie: listopad
+  assert.equal(F.textMonthFor({ due: '2026-10-28', handedIn: '2026-11-05', start, closed: { '2026-10': true }, month: '2026-11' }), '2026-11');
+  // ... a listopad też zamknięty: pierwszy otwarty po nim
+  assert.equal(F.textMonthFor({ due: '2026-10-28', handedIn: '2026-11-05', start, closed: { '2026-10': true, '2026-11': true }, month: '2026-12' }), '2026-12');
+  // protokół uzupełniający za październik dalej widzi swój tekst
+  assert.equal(F.textMonthFor({ due: '2026-10-28', handedIn: '2026-10-20', start, closed: { '2026-10': true }, month: '2026-10' }), '2026-10');
+  // zamknięty miesiąc, tekst przekazany na czas: zostaje w swoim miesiącu (nie wskakuje do kolejnych)
+  assert.equal(F.textMonthFor({ due: '2026-10-28', handedIn: '2026-10-20', start, closed: { '2026-10': true }, month: '2026-11' }), '2026-10');
+  // termin sprzed rozliczeń, przekazany już po włączeniu: miesiąc przekazania; stary tekst bez daty przekazania zostaje w przeszłości
+  assert.equal(F.textMonthFor({ due: '2026-09-30', handedIn: '2026-10-03', start, month: '2026-10' }), '2026-10');
+  assert.equal(F.textMonthFor({ due: '2026-08-10', handedIn: null, start, month: '2026-10' }), '2026-08');
+});
+
+test('buildReport: tekst wchodzi do miesiąca terminu, w PDF ma termin i dzień przekazania', () => {
+  const people = { u1: { name: 'Oliwia', rate: 15000 } };
+  const tasks = [
+    T('1', 'Termin w październiku, oddany w listopadzie', { due: '2026-10-28', handedIn: '2026-11-05' }),
+    T('2', 'Termin w listopadzie, oddany w październiku', { due: '2026-11-15', handedIn: '2026-10-30' }),
+    T('3', 'Bez terminu, oddany w październiku', { handedIn: '2026-10-12' }),
+    T('4', 'Termin w październiku, bez daty przekazania', { due: '2026-10-20', handedIn: null }),
+  ];
+  const oct = F.buildReport({ month: '2026-10', tasks, people, start: '2026-10' });
+  assert.deepEqual(oct.persons[0].texts.map((x) => [x.id, x.date, x.handedIn]), [['3', '2026-10-12', '2026-10-12'], ['4', '2026-10-20', null], ['1', '2026-10-28', '2026-11-05']]);
+  assert.equal(oct.undated.length, 0, 'tekst z terminem nie trafia do menu „bez daty”');
+  const nov = F.buildReport({ month: '2026-11', tasks, people, start: '2026-10' });
+  assert.deepEqual(nov.persons[0].texts.map((x) => x.id), ['2']);
+  // po zamknięciu października spóźniony tekst (termin X, przekazany XI) wchodzi do listopada
+  const late = [T('1', 'Spóźniony', { due: '2026-10-28', handedIn: '2026-11-05' })];
+  assert.equal(F.buildReport({ month: '2026-10', tasks: late, people, start: '2026-10', closed: { '2026-10': true } }).persons[0].texts.length, 1, 'uzupełnienie za październik nadal go widzi');
+  assert.equal(F.buildReport({ month: '2026-11', tasks: late, people, start: '2026-10', closed: { '2026-10': true } }).persons[0].texts.length, 1);
+});

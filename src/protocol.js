@@ -70,7 +70,7 @@ function renderProtocol(data) {
       doc.moveDown(0.8);
 
       doc.font('Sans').fontSize(9.5).fillColor(INK).text(
-        'Poniżej zestawienie tekstów oddanych do redakcji w wymienionym miesiącu. Prosimy o sprawdzenie, czy jest kompletne i zgodne z Twoją wiedzą, dopisanie liczby godzin (jeśli dotyczy), podpisanie i odesłanie'
+        'Poniżej zestawienie tekstów z terminem oddania w wymienionym miesiącu (tekst bez terminu liczy się według dnia przekazania do redakcji). Prosimy o sprawdzenie, czy jest kompletne i zgodne z Twoją wiedzą, dopisanie liczby godzin (jeśli dotyczy), podpisanie i odesłanie'
         + (data.returnEmail ? ` na adres ${data.returnEmail}.` : ' do redakcji.')
         + ' Jeśli czegoś brakuje lub coś się nie zgadza, napisz w uwagach albo do nas przed podpisaniem.',
         left, doc.y, { width, lineGap: 1.5 },
@@ -132,12 +132,12 @@ function renderProtocol(data) {
         [
           { label: 'Lp.', w: 30 },
           { label: 'Tytuł tekstu', w: 245 },
-          { label: 'Oddano', w: 70 },
+          { label: 'Termin', w: 70 },
           { label: 'Stawka', w: 75, align: 'right' },
           { label: 'Kwota', w: 75, align: 'right' },
         ],
         person.texts.map((t, i) => [i + 1, t.title, plDate(t.date), formatMoney(t.rate), formatMoney(t.amount)]),
-        'W tym miesiącu nie oddano tekstów.',
+        'Brak tekstów z terminem w tym miesiącu.',
       );
 
       if (person.bonuses.length) {

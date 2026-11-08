@@ -36,6 +36,13 @@ function prevMonth(key) {
   return `${y}-${String(m).padStart(2, '0')}`;
 }
 
+function nextMonth(key) {
+  let y = +key.slice(0, 4);
+  let m = +key.slice(5, 7) + 1;
+  if (m === 13) { m = 1; y += 1; }
+  return `${y}-${String(m).padStart(2, '0')}`;
+}
+
 function lastDayOf(key) {
   const y = +key.slice(0, 4);
   const m = +key.slice(5, 7);
@@ -81,13 +88,30 @@ function bonusMonthFor({ handedIn, start, closed = {}, currentMonth }) {
   return currentMonth;
 }
 
+// Za który miesiąc rozliczyć oddany tekst, gdy zestawiamy miesiąc `month`?
+// Zasada: miesiąc WPISANEGO TERMINU ODDANIA (`due`), a bez terminu miesiąc faktycznego przekazania do redakcji (`handedIn`).
+// Wyjątek: miesiąc terminu jest już zamknięty (protokół wysłany albo pominięty, albo sprzed włączenia rozliczeń), a tekst przekazano
+// dopiero w późniejszym miesiącu (spóźnienie). Wtedy tekst wchodzi do miesiąca przekazania (albo pierwszego otwartego po nim), żeby nie przepadł.
+// Zestawiany miesiąc nigdy nie liczy się jako zamknięty: protokół uzupełniający dalej widzi swoje teksty.
+// null = brak terminu i daty przekazania (tekst trafia do menu „bez daty”).
+function textMonthFor({ due = null, handedIn = null, start = null, closed = {}, month }) {
+  const isClosed = (m) => m !== month && (Boolean(closed[m]) || Boolean(start && m < start));
+  const base = due ? monthOf(due) : handedIn ? monthOf(handedIn) : null;
+  if (!base || !isClosed(base)) return base;
+  const handedMonth = handedIn ? monthOf(handedIn) : null;
+  if (!handedMonth || handedMonth <= base) return base; // nie spóźniony: zostaje w swoim miesiącu (protokół uzupełniający)
+  let m = handedMonth;
+  while (isClosed(m)) m = nextMonth(m);
+  return m;
+}
+
 // ---------------------------------------------------------------- zestawienie
-// tasks: {id, name, url, status, assigneeId, handedIn, settled, archived, created, bonuses: [{i, a, n, m, s}], claimed, socialDone}
-//   handedIn: data oddania do redakcji (YYYY-MM-DD), settled: miesiąc rozliczenia tekstu, created: data założenia posta,
+// tasks: {id, name, url, status, assigneeId, due, handedIn, settled, archived, created, bonuses: [{i, a, n, m, s}], claimed, socialDone}
+//   due: wpisany termin oddania (YYYY-MM-DD), handedIn: faktyczne przekazanie do redakcji, settled: miesiąc rozliczenia tekstu, created: data założenia posta,
 //   bonuses: premie (i = numer premii, a = kwota w groszach, n = za co, m = miesiąc rozliczenia, s = miesiąc, w którym już rozliczono),
 //   claimed: osoba zgłosiła premię za social, a zarząd jeszcze jej nie zatwierdził, socialDone: premia za social jest już przyznana
-// people: {userId: {name, rate}}  (rate w groszach)
-function buildReport({ month, tasks, people = {} }) {
+// people: {userId: {name, rate}}  (rate w groszach); start: pierwszy miesiąc rozliczeń; closed: {miesiąc: true} dla wysłanych lub pominiętych
+function buildReport({ month, tasks, people = {}, start = null, closed = {} }) {
   const byPerson = new Map();
   const noRate = new Map();
   const unassigned = [];
@@ -103,12 +127,14 @@ function buildReport({ month, tasks, people = {} }) {
   for (const t of tasks) {
     if (t.claimed && !t.socialDone && t.assigneeId) claims.push({ id: t.id, title: t.name, userId: t.assigneeId });
     const handed = isWritingDone(t.status) && !t.settled;
-    if (handed && !t.handedIn && t.assigneeId && (!t.created || t.created >= oldestCreated)) {
+    const tm = handed ? textMonthFor({ due: t.due || null, handedIn: t.handedIn || null, start, closed, month }) : null;
+    if (handed && !tm && t.assigneeId && (!t.created || t.created >= oldestCreated)) {
       undated.push({ id: t.id, title: t.name, archived: Boolean(t.archived), status: t.status, assigneeId: t.assigneeId, created: t.created || null });
     }
-    if (handed && t.handedIn && monthOf(t.handedIn) === month) {
+    if (handed && tm === month) {
       if (!t.assigneeId) unassigned.push({ id: t.id, title: t.name, kind: 'tekst' });
-      else person(t.assigneeId).texts.push({ id: t.id, title: t.name, url: t.url, date: t.handedIn });
+      // date: termin oddania (podstawa rozliczenia), handedIn: kiedy tekst faktycznie przekazano (w PDF obok terminu)
+      else person(t.assigneeId).texts.push({ id: t.id, title: t.name, url: t.url, date: t.due || t.handedIn, handedIn: t.handedIn || null });
     }
     for (const b of t.bonuses || []) {
       if (!(b.a > 0) || b.s || b.m !== month) continue;
@@ -155,7 +181,7 @@ function buildReport({ month, tasks, people = {} }) {
 function reportSignature(report) {
   return JSON.stringify(report.persons.map((p) => [
     p.userId, p.name, p.rate,
-    p.texts.map((x) => [x.id, x.title, x.date, x.amount]),
+    p.texts.map((x) => [x.id, x.title, x.date, x.handedIn || null, x.amount]),
     p.bonuses.map((x) => [x.id, x.bid, x.note, x.amount]),
   ]));
 }
@@ -168,6 +194,6 @@ function safeFileName(text) {
 
 module.exports = {
   parseMoney, formatMoney, MAX_GROSZE,
-  isMonthKey, monthOf, monthLabel, prevMonth, lastDayOf, firstWorkdayOf, normalizeMonth, monthToPrepare, bonusMonthFor,
+  isMonthKey, monthOf, monthLabel, prevMonth, nextMonth, lastDayOf, firstWorkdayOf, normalizeMonth, monthToPrepare, bonusMonthFor, textMonthFor,
   buildReport, reportSignature, safeFileName,
 };

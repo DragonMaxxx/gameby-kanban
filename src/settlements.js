@@ -108,7 +108,8 @@ function createSettlements({
     if (changed) store.set('seen', seen);
   }
 
-  // /rozliczenia oddano: ręczna poprawka daty oddania tekstu (w poście z zadaniem). „brak” usuwa datę (tekst wróci do menu „bez daty”).
+  // /rozliczenia oddano: ręczna poprawka daty przekazania tekstu do redakcji (w poście z zadaniem). Liczy się, gdy zadanie nie ma terminu oddania
+  // albo tekst spóźnił się za zamknięty miesiąc terminu. „brak” usuwa datę.
   async function cmdOddano(interaction) {
     const raw = interaction.options.getString('data', true).trim();
     const remove = REMOVE_WORDS.test(raw);
@@ -121,15 +122,19 @@ function createSettlements({
       const m = metaOf(thread.id) || {};
       if (m.s) throw new UserError(`Ten tekst jest już rozliczony w protokole za ${F.monthLabel(m.s)}, więc jego daty oddania nie można zmienić.`);
       if (remove) {
-        if (!m.h) throw new UserError('Ten tekst nie ma zapisanej daty oddania.');
+        if (!m.h) throw new UserError('Ten tekst nie ma zapisanej daty przekazania do redakcji.');
         patchMeta(thread.id, { h: null });
-        reply = 'Usunięto datę oddania. Jeśli tekst jest już oddany, szkic pokaże go w menu „Zaznacz teksty oddane w: …”.';
+        reply = 'Usunięto datę przekazania. Jeśli zadanie ma termin oddania, tekst dalej rozliczy się według terminu; bez terminu szkic pokaże go w menu „Zaznacz teksty oddane w: …”.';
         return;
       }
       patchMeta(thread.id, { h: date });
       const cur = await resolveTask(thread, st, day);
-      const month = F.monthOf(date);
-      const parts = [`Data oddania: ${B.fmtDate(date)}${m.h && m.h !== date ? ` (było ${B.fmtDate(m.h)})` : ''}. Tekst rozliczy się za ${F.monthLabel(month)}.`];
+      const closed = closedMonths();
+      const month = F.textMonthFor({ due: cur.due, handedIn: date, start: getFin().start || null, closed, month: null });
+      const parts = [`Data przekazania do redakcji: ${B.fmtDate(date)}${m.h && m.h !== date ? ` (było ${B.fmtDate(m.h)})` : ''}.`];
+      if (cur.due && month === F.monthOf(cur.due)) parts.push(`Tekst ma termin oddania ${B.fmtDate(cur.due)}, więc i tak rozliczy się za ${F.monthLabel(month)}: data przekazania liczy się tylko bez terminu albo przy spóźnieniu po zamknięciu miesiąca terminu.`);
+      else if (cur.due) parts.push(`Termin oddania (${B.fmtDate(cur.due)}) wypada w zamkniętym miesiącu, a tekst przekazano później, więc rozliczy się za ${F.monthLabel(month)}.`);
+      else parts.push(`Zadanie nie ma terminu oddania, więc tekst rozliczy się za ${F.monthLabel(month)}. Termin ustawisz przez /edytuj termin.`);
       if (!B.isWritingDone(cur.status)) parts.push(`Uwaga: zadanie ma status „${cur.status}”, więc wejdzie do rozliczenia dopiero po przejściu do „Do redakcji” lub dalej.`);
       if (!cur.assigneeId) parts.push('Uwaga: zadanie nie ma osoby, więc tekst nie wejdzie do protokołu, dopóki ktoś nie zostanie przypisany.');
       const latest = latestRecord(month);
@@ -158,8 +163,9 @@ function createSettlements({
     return m.x ? 'claimed' : 'none';
   }
 
-  // Miesiąc, do którego trafi premia dodana dziś do tego tekstu (zasada jak przy komendzie premia).
-  const bonusMonthOf = (m) => F.bonusMonthFor({ handedIn: m.h || null, start: getFin().start || null, closed: closedMonths(), currentMonth: F.monthOf(today()) });
+  // Miesiąc, do którego trafi premia dodana dziś do tego tekstu (zasada jak przy komendzie premia): miesiąc tekstu, czyli jego terminu oddania
+  // (bez terminu: przekazania), o ile jest jeszcze otwarty.
+  const bonusMonthOf = (m) => F.bonusMonthFor({ handedIn: m.d || m.h || null, start: getFin().start || null, closed: closedMonths(), currentMonth: F.monthOf(today()) });
 
   function addSocialBonus(threadId, month, amount) {
     const m = metaOf(threadId) || {};
@@ -218,6 +224,7 @@ function createSettlements({
         url: t.url,
         status: t.status,
         assigneeId: t.assigneeId,
+        due: t.due || null,
         handedIn: m.h || null,
         settled: m.s || null,
         archived: Boolean(t.thread && t.thread.archived),
@@ -232,7 +239,7 @@ function createSettlements({
 
   async function buildFor(month) {
     const { tasks, note } = await gatherTasks();
-    const report = F.buildReport({ month, tasks, people: ratesOf() });
+    const report = F.buildReport({ month, tasks, people: ratesOf(), start: getFin().start || null, closed: closedMonths() });
     return { report, sig: F.reportSignature(report), note };
   }
 
@@ -263,7 +270,7 @@ function createSettlements({
       notes.push(`Bez osoby (nie wejdą do protokołów): ${shown}${r.unassigned.length > 5 ? ` i ${r.unassigned.length - 5} więcej` : ''}. Przydziel osobę na karcie i odśwież szkic.`);
     }
     if (r.undated.length) {
-      notes.push(`Bez daty oddania (tekst z czasów przed rozliczeniami): ${r.undated.length}. Zaznacz w menu niżej te, które oddano w tym miesiącu.`);
+      notes.push(`Bez terminu i bez daty przekazania (np. tekst sprzed rozliczeń): ${r.undated.length}. Zaznacz w menu niżej te, które oddano w tym miesiącu.`);
     }
     const claims = r.claims || [];
     if (claims.length) {
@@ -338,7 +345,7 @@ function createSettlements({
     const left = [];
     if (r.noRate.length) left.push(`bez stawki: ${r.noRate.reduce((s, x) => s + x.texts + x.bonuses, 0)}`);
     if (r.unassigned.length) left.push(`bez osoby: ${r.unassigned.length}`);
-    if (r.undated.length) left.push(`bez daty oddania: ${r.undated.length}`);
+    if (r.undated.length) left.push(`bez terminu i daty przekazania: ${r.undated.length}`);
     const claims = (r.claims || []).length;
     const lines = [
       `**Wysłać protokoły za ${r.label} do ${r.persons.length} ${plural(r.persons.length, 'osoby', 'osób', 'osób')}?** Razem ${F.formatMoney(r.grandTotal)}.`,

@@ -57,8 +57,8 @@ function buildCommands() {
         .addStringOption((o) => o.setName('kwota').setDescription('Kwota premii, np. 20 albo 20,50; „brak” usuwa kwotę i wyłącza zatwierdzanie premii').setRequired(true).setMaxLength(20)))
       .addSubcommand((c) => c
         .setName('oddano')
-        .setDescription('Popraw datę oddania tekstu, od niej zależy miesiąc rozliczenia (użyj w poście z zadaniem)')
-        .addStringOption((o) => o.setName('data').setDescription('Data oddania: 28.10, 28.10.2026 lub 2026-10-28; „brak” usuwa datę').setRequired(true).setMaxLength(10)))
+        .setDescription('Popraw datę przekazania tekstu (liczy się, gdy nie ma terminu; użyj w poście z zadaniem)')
+        .addStringOption((o) => o.setName('data').setDescription('Data przekazania: 28.10, 28.10.2026 lub 2026-10-28; „brak” usuwa datę').setRequired(true).setMaxLength(10)))
       .addSubcommand((c) => c
         .setName('szkic')
         .setDescription('Przygotuj szkic protokołów za miesiąc i wyślij go do mnie w wiadomości prywatnej')

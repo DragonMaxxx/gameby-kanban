@@ -86,11 +86,11 @@ Zadania na dalszych etapach zostają tam, gdzie są.
 
 ## Rozliczenia z osobami piszącymi (tylko zarząd)
 
-**Co to robi.** Każda osoba ma stałą stawkę za tekst. Tekst liczy się do miesiąca, w którym został **oddany do redakcji**, czyli przeszedł do statusu „Do redakcji”
-(przyciskiem na karcie, na stronie albo ręczną zmianą tagu). Liczy się **pierwsze** oddanie: powrót do pisania na poprawki, ponowne oddanie i publikacja nie zmieniają tej daty.
-Jeśli bot nie zobaczył zmiany (był wyłączony, np. przy redeployu), zapisze datę przy najbliższym przeglądzie forum (żywa tablica robi go co najwyżej co 10 minut), czyli z dniem wykrycia.
-**Ważne dla redakcji:** autor po oddaniu tekstu przesuwa kartę do **Do redakcji**. Jeśli karta pójdzie z „W pisaniu” od razu do „Do publikacji” lub „Opublikowane”, datą oddania będzie dzień tej zmiany, czyli zwykle dzień publikacji.
-Taką datę poprawisz w poście z zadaniem: `/rozliczenia oddano data:28.10` (`data:brak` usuwa datę). Daty tekstu z zatwierdzonego protokołu zmienić się nie da.
+**Co to robi.** Każda osoba ma stałą stawkę za tekst. Tekst liczy się do miesiąca **wpisanego terminu oddania** (pole „Oddanie tekstu” na karcie, `/zadanie termin:` albo `/edytuj termin:`),
+o ile tekst jest już oddany, czyli ma status „Do redakcji”, „Do publikacji” albo „Opublikowane”. Tekst z terminem 28.10 przekazany 2.11 rozlicza się więc za październik.
+Bot zapisuje też dzień faktycznego przekazania do redakcji (pierwsze przejście do „Do redakcji” lub dalej; powrót na poprawki go nie zmienia). Liczy się on tylko w dwóch przypadkach:
+zadanie **nie ma terminu** (wtedy decyduje miesiąc przekazania) albo tekst się **spóźnił** i przekazano go już po zamknięciu protokołu za miesiąc terminu. Wtedy wchodzi do miesiąca przekazania i nie przepada.
+W PDF kolumna „Termin” pokazuje termin oddania (bez terminu: dzień przekazania). Dzień przekazania poprawisz w poście `/rozliczenia oddano data:28.10` (`data:brak` usuwa).
 Pierwszego dnia roboczego następnego miesiąca, od godziny podsumowania (`DIGEST_HOUR`), bot przygotowuje szkic protokołów za poprzedni miesiąc i wysyła **Tobie** w wiadomości prywatnej.
 Dopiero po Twoim zatwierdzeniu każda osoba dostaje swój protokół (PDF) w wiadomości prywatnej z prośbą, żeby sprawdziła zestawienie, dopisała liczbę godzin, podpisała i odesłała e-mailem.
 
@@ -115,10 +115,10 @@ Opcjonalnie `PROTOCOL_ISSUER` (nazwa zleceniodawcy na protokole, domyślnie `Gam
 4. **Zatwierdzenie:** **Wyślij do osób**, potem potwierdzenie („Tak, wyślij”). Przed wysyłką bot sprawdza jeszcze raz, czy nic się nie zmieniło od szkicu (nowy tekst, premia, stawka, zmiana statusu): jeśli tak,
    nic nie wysyła i pokazuje nowy szkic do ponownego zatwierdzenia. Po wysyłce dane są **zamrożone**: teksty i premie z protokołu nie wejdą do żadnego następnego i nie zmienisz ich wstecz.
    Osobom, do których wiadomość nie dotarła (mają wyłączone wiadomości prywatne od członków serwera), bot pokaże listę i przycisk **Ponów wysyłkę**.
-5. **Zła data oddania:** w poście z zadaniem `/rozliczenia oddano data:28.10` (także `28.10.2026` albo `2026-10-28`). Bot odpowie, za który miesiąc tekst się teraz rozliczy, i podpowie, czy trzeba odświeżyć szkic albo zrobić protokół uzupełniający.
+5. **Zły miesiąc tekstu:** popraw termin oddania (`/edytuj termin:28.10` w poście). Dla zadań bez terminu: `/rozliczenia oddano data:28.10` (dzień przekazania). Bot odpowie, za który miesiąc tekst się rozliczy, i podpowie, czy trzeba odświeżyć szkic albo zrobić protokół uzupełniający.
 6. **Uzupełnienie:** teksty, które zostały poza protokołem (np. osobie brakowało stawki), rozliczysz później: `/rozliczenia szkic miesiac:2026-10` po wysłaniu tworzy protokół uzupełniający tylko z tego, co zostało. „Pomiń ten miesiąc” zamyka szkic bez rozliczania.
 
-**Pierwszy miesiąc.** Teksty oddane przed wdrożeniem nie mają daty oddania. Szkic pokaże je w menu „Zaznacz teksty oddane w: …” (tylko posty założone w tym lub poprzednim miesiącu, żeby nie wracały stare opublikowane teksty);
+**Pierwszy miesiąc.** Teksty oddane przed wdrożeniem, które nie mają ani terminu, ani daty przekazania, szkic pokaże w menu „Zaznacz teksty oddane w: …” (tylko posty założone w tym lub poprzednim miesiącu, żeby nie wracały stare opublikowane teksty);
 zaznaczasz te, które faktycznie oddano w rozliczanym miesiącu, a szkic odświeża się sam.
 
 **Kto co widzi.** Stawki, kwoty, premie i szkice widzi tylko zarząd: odpowiedzi komend są prywatne, szkic idzie do wiadomości prywatnych, a kwoty nie trafiają na kartę zadania, tablicę, stronę z tablicą, podsumowanie dnia ani do logów.
